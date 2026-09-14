@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { ArrowRight, Shield, X } from 'lucide-react';
 import type { Match, Player, Team } from './types';
 import { dateLabel, timeLabel, initials } from './lib';
-export function Logo({small=false}:{small?:boolean}) { return <div className={`brand ${small?'small':''}`}><span className="brand-mark">m<span>′</span></span>{!small&&<span>minuto<span className="brand-dot">.</span></span>}</div>; }
+export function Logo({small=false}:{small?:boolean}) { return <div className={`brand ${small?'small':''}`}><span className="brand-mark">B<span>′</span></span>{!small&&<span>BucaGest<span className="brand-dot">.</span></span>}</div>; }
 export function Crest({name,opponent=false,large=false}:{name:string;opponent?:boolean;large?:boolean}) {return <div className={`crest ${opponent?'opponent':''} ${large?'large':''}`} aria-label={name}><Shield strokeWidth={1.2}/><span>{initials(name)}</span><i>FC</i></div>;}
 export function Avatar({player}:{player:Player}) {return <div className={`avatar pos-${player.position}`}><span>{player.number.toString().padStart(2,'0')}</span></div>;}
 export function Modal({title,children,onClose,wide=false}:{title:string;children:ReactNode;onClose:()=>void;wide?:boolean}) {
