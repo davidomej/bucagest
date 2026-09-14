@@ -24,20 +24,23 @@ export async function api(path: string, body?: unknown) {
 }
 export function resizeImage(file: File, size: number): Promise<Blob> {
   return new Promise((resolve,reject)=>{
-    const img=new Image();
-    const url=URL.createObjectURL(file);
-    img.onload=()=>{
-      URL.revokeObjectURL(url);
-      const side=Math.min(img.naturalWidth,img.naturalHeight);
-      const sx=(img.naturalWidth-side)/2, sy=(img.naturalHeight-side)/2;
-      const canvas=document.createElement('canvas'); canvas.width=size; canvas.height=size;
-      const ctx=canvas.getContext('2d');
-      if(!ctx) return reject(new Error('No se puede procesar la imagen.'));
-      ctx.drawImage(img,sx,sy,side,side,0,0,size,size);
-      canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('No se puede procesar la imagen.')),'image/webp',0.82);
+    const reader=new FileReader();
+    reader.onload=()=>{
+      const img=new Image();
+      img.onload=()=>{
+        const side=Math.min(img.naturalWidth,img.naturalHeight);
+        const sx=(img.naturalWidth-side)/2, sy=(img.naturalHeight-side)/2;
+        const canvas=document.createElement('canvas'); canvas.width=size; canvas.height=size;
+        const ctx=canvas.getContext('2d');
+        if(!ctx) return reject(new Error('No se puede procesar la imagen.'));
+        ctx.drawImage(img,sx,sy,side,side,0,0,size,size);
+        canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('No se puede procesar la imagen.')),'image/webp',0.82);
+      };
+      img.onerror=()=>reject(new Error('El archivo no es una imagen válida.'));
+      img.src=reader.result as string;
     };
-    img.onerror=()=>{URL.revokeObjectURL(url);reject(new Error('El archivo no es una imagen válida.'));};
-    img.src=url;
+    reader.onerror=()=>reject(new Error('No se puede leer el archivo.'));
+    reader.readAsDataURL(file);
   });
 }
 export async function uploadAsset(blob: Blob): Promise<string> {
