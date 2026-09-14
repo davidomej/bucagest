@@ -1,10 +1,53 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
-import { ArrowRight, Shield, X } from 'lucide-react';
-import type { Match, Player, Team } from './types';
-import { dateLabel, timeLabel, initials } from './lib';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { ArrowRight, LoaderCircle, Shield, Upload, X } from 'lucide-react';
+import type { Match, Player, Team, TeamColors } from './types';
+import { assetUrl, dateLabel, resizeImage, timeLabel, initials, uploadAsset } from './lib';
 export function Logo({small=false}:{small?:boolean}) { return <div className={`brand ${small?'small':''}`}><span className="brand-mark">B<span>′</span></span>{!small&&<span>BucaGest<span className="brand-dot">.</span></span>}</div>; }
-export function Crest({name,opponent=false,large=false}:{name:string;opponent?:boolean;large?:boolean}) {return <div className={`crest ${opponent?'opponent':''} ${large?'large':''}`} aria-label={name}><Shield strokeWidth={1.2}/><span>{initials(name)}</span><i>FC</i></div>;}
-export function Avatar({player}:{player:Player}) {return <div className={`avatar pos-${player.position}`}><span>{player.number.toString().padStart(2,'0')}</span></div>;}
+export function Crest({name,crestId=null,colors,opponent=false,large=false}:{name:string;crestId?:string|null;colors?:TeamColors;opponent?:boolean;large?:boolean}) {
+  const url=assetUrl(crestId);
+  if(url) return <div className={`crest photo ${large?'large':''}`} aria-label={name}><img src={url} alt=""/></div>;
+  const branded=colors&&!opponent;
+  const style=branded?({'--team-primary':colors!.primary,'--team-secondary':colors!.secondary} as CSSProperties):undefined;
+  return <div className={`crest ${opponent?'opponent':''} ${large?'large':''} ${branded?'branded':''}`} style={style} aria-label={name}><Shield strokeWidth={1.2}/><span>{initials(name)}</span><i>FC</i></div>;
+}
+export function Jersey({number,colors,size='card'}:{number:number;colors?:TeamColors;size?:'card'|'chip'|'mini'}) {
+  const primary=colors?.primary??'#8ac9eb', secondary=colors?.secondary??'#223e4c';
+  return <svg className={`jersey jersey-${size}`} viewBox="0 0 100 100" role="img" aria-label={`Dorsal ${number}`}>
+    <path d="M30 8 L8 22 L18 40 L28 33 L28 92 L72 92 L72 33 L82 40 L92 22 L70 8 L60 14 Q50 21 40 14 Z" fill={primary} stroke={secondary} strokeWidth="3" strokeLinejoin="round" strokeLinecap="round"/>
+    <text x="50" y="67" textAnchor="middle" fontFamily="'Barlow Condensed',Impact,sans-serif" fontWeight="700" fontSize="34" fill={secondary}>{number}</text>
+  </svg>;
+}
+export function Avatar({player,colors}:{player:Player;colors?:TeamColors}) {
+  const url=assetUrl(player.photoId);
+  if(url) return <div className="avatar avatar-photo"><img src={url} alt=""/></div>;
+  const style=colors?({'--team-primary':colors.primary,'--team-secondary':colors.secondary} as CSSProperties):undefined;
+  return <div className={`avatar pos-${player.position} ${colors?'branded':''}`} style={style}><span>{player.number.toString().padStart(2,'0')}</span></div>;
+}
+export function ImageField({label,value,onChange,shape='square',disabled=false}:{label:string;value:string|null;onChange:(id:string|null)=>void;shape?:'square'|'circle';disabled?:boolean}) {
+  const [busy,setBusy]=useState(false),[error,setError]=useState('');
+  const url=assetUrl(value);
+  async function handle(file:File|undefined) {
+    if(!file) return; setError(''); setBusy(true);
+    try {
+      if(!file.type.startsWith('image/')) throw new Error('Selecciona un archivo de imagen.');
+      if(file.size>8_000_000) throw new Error('La imagen debe pesar menos de 8 MB.');
+      const blob=await resizeImage(file, shape==='circle'?320:256);
+      onChange(await uploadAsset(blob));
+    } catch(e) { setError((e as Error).message||'No se pudo subir la imagen.'); }
+    finally { setBusy(false); }
+  }
+  return <div className={`image-field ${shape}`}>
+    <div className="image-field-preview">{url?<img src={url} alt=""/>:<span>{label[0]}</span>}{busy&&<LoaderCircle className="spin" size={20}/>}</div>
+    <div className="image-field-actions">
+      <span>{label}</span>
+      <div className="button-group">
+        <label className="button secondary small"><Upload size={15}/> {value?'Cambiar':'Subir imagen'}<input type="file" accept="image/png,image/jpeg,image/webp" hidden disabled={disabled||busy} onChange={e=>{void handle(e.target.files?.[0]);e.target.value='';}}/></label>
+        {value&&<button type="button" className="text-button" disabled={disabled||busy} onClick={()=>onChange(null)}>Quitar</button>}
+      </div>
+    </div>
+    {error&&<span className="error-text small">{error}</span>}
+  </div>;
+}
 export function Modal({title,children,onClose,wide=false}:{title:string;children:ReactNode;onClose:()=>void;wide?:boolean}) {
   const ref=useRef<HTMLDialogElement>(null);
   const [error,setError]=useState('');

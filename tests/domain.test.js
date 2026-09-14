@@ -1,15 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyCommand, emptyTeam, elapsed, playerSeconds } from '../server/domain.js';
+import { applyCommand, emptyWorkspace, elapsed, playerSeconds } from '../server/domain.js';
 
 function fixture(){
-  let state=emptyTeam('Test FC');
-  for(let n=1;n<=9;n++)state=applyCommand(state,{type:'player.save',payload:{name:`Jugador ${n}`,number:n,position:n===1?'POR':'MED'}});
-  state=applyCommand(state,{type:'fixture.save',payload:{opponent:'Rival',date:'2026-09-20T18:00:00Z',venue:'Municipal',home:true,round:1,season:'2026/27'}});
-  const id=state.matches[0].id;
-  const command=(type,payload={},now=0)=>{state=applyCommand(state,{type,payload:{matchId:id,...payload}},now);return state;};
-  command('match.lineup',{playerIds:state.players.slice(0,7).map(p=>p.id)});
-  return {get state(){return state;},get match(){return state.matches[0];},get ids(){return state.players.map(p=>p.id);},command};
+  let state=emptyWorkspace('Test FC');
+  const teamId=state.teams[0].id;
+  const team=()=>state.teams.find(t=>t.id===teamId);
+  const apply=(type,payload={},now=0)=>{state=applyCommand(state,{type,teamId,payload},now);return state;};
+  for(let n=1;n<=9;n++)apply('player.save',{name:`Jugador ${n}`,number:n,position:n===1?'POR':'MED'});
+  apply('fixture.save',{opponent:'Rival',date:'2026-09-20T18:00:00Z',venue:'Municipal',home:true,round:1,season:'2026/27'});
+  const id=team().matches[0].id;
+  const command=(type,payload={},now=0)=>{state=applyCommand(state,{type,teamId,payload:{matchId:id,...payload}},now);return state;};
+  command('match.lineup',{playerIds:team().players.slice(0,7).map(p=>p.id)});
+  return {get state(){return state;},get match(){return team().matches[0];},get matches(){return team().matches;},get ids(){return team().players.map(p=>p.id);},get settings(){return team().settings;},command};
 }
 test('el reloj se reconstruye tras recargar y descuenta el descanso',()=>{
   const f=fixture();f.command('match.start',{},1000);assert.equal(elapsed(structuredClone(f.match),601000),600);
@@ -60,11 +63,38 @@ test('finalizar es idempotente y un partido cerrado no puede reanudarse',()=>{
 });
 test('se aplican los límites de titulares y las reglas de reentrada',()=>{
   const f=fixture();assert.throws(()=>f.command('match.lineup',{playerIds:f.ids}),/Too big/);
-  f.command('settings',{...f.state.settings,allowReentry:false});f.command('match.start');f.command('match.substitute',{outId:f.ids[1],inId:f.ids[7]},600000);
+  f.command('settings',{...f.settings,allowReentry:false});f.command('match.start');f.command('match.substitute',{outId:f.ids[1],inId:f.ids[7]},600000);
   assert.throws(()=>f.command('match.substitute',{outId:f.ids[7],inId:f.ids[1]},900000),/reentradas/);
 });
 test('impide dorsal duplicado y más de un partido activo por equipo',()=>{
   const f=fixture();assert.throws(()=>f.command('player.save',{name:'Otro',number:1,position:'DEF'}),/dorsal/);f.command('match.start');
   f.command('fixture.save',{opponent:'Segundo rival',date:'2026-09-27T18:00:00Z',home:false,round:2,season:'2026/27'});
-  const id=f.state.matches[1].id;f.command('match.lineup',{matchId:id,playerIds:[f.ids[0]]});assert.throws(()=>f.command('match.start',{matchId:id}),/otro partido/);
+  const id=f.matches[1].id;f.command('match.lineup',{matchId:id,playerIds:[f.ids[0]]});assert.throws(()=>f.command('match.start',{matchId:id}),/otro partido/);
+});
+test('un entrenador puede crear y cambiar entre varios equipos, cada uno con su propia plantilla',()=>{
+  let state=emptyWorkspace('Equipo A');const firstId=state.teams[0].id;
+  state=applyCommand(state,{type:'team.create',payload:{name:'Equipo B'}});
+  assert.equal(state.teams.length,2);assert.equal(state.activeTeamId,state.teams[1].id);
+  const secondId=state.teams[1].id;
+  state=applyCommand(state,{type:'player.save',teamId:secondId,payload:{name:'Solo en B',number:9,position:'DEL'}});
+  assert.equal(state.teams.find(t=>t.id===firstId).players.length,0);
+  assert.equal(state.teams.find(t=>t.id===secondId).players.length,1);
+  state=applyCommand(state,{type:'player.save',teamId:firstId,payload:{name:'Mismo dorsal en A',number:9,position:'DEL'}});
+  assert.equal(state.teams.find(t=>t.id===firstId).players.length,1);
+  state=applyCommand(state,{type:'team.select',payload:{id:firstId}});assert.equal(state.activeTeamId,firstId);
+  state=applyCommand(state,{type:'team.delete',payload:{id:secondId}});assert.equal(state.teams.length,1);
+  assert.throws(()=>applyCommand(state,{type:'team.delete',payload:{id:firstId}}),/único equipo/);
+});
+test('las ligas se crean una vez y se comparten entre equipos del mismo entrenador',()=>{
+  let state=emptyWorkspace('Equipo A');const firstId=state.teams[0].id;
+  state=applyCommand(state,{type:'team.create',payload:{name:'Equipo B'}});const secondId=state.activeTeamId;
+  state=applyCommand(state,{type:'league.save',payload:{name:'Liga Municipal',season:'2026/27',color:'#8ac9eb'}});
+  const leagueId=state.leagues[0].id;
+  state=applyCommand(state,{type:'settings',teamId:firstId,payload:{...state.teams.find(t=>t.id===firstId).settings,leagueIds:[leagueId]}});
+  state=applyCommand(state,{type:'settings',teamId:secondId,payload:{...state.teams.find(t=>t.id===secondId).settings,leagueIds:[leagueId]}});
+  assert.equal(state.teams.find(t=>t.id===firstId).settings.leagueIds[0],leagueId);
+  assert.equal(state.teams.find(t=>t.id===secondId).settings.leagueIds[0],leagueId);
+  state=applyCommand(state,{type:'league.delete',payload:{id:leagueId}});
+  assert.equal(state.leagues.length,0);
+  assert.deepEqual(state.teams.find(t=>t.id===firstId).settings.leagueIds,[]);
 });

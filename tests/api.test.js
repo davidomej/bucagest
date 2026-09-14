@@ -25,36 +25,37 @@ test('API y persistencia: autenticación, aislamiento, concurrencia y reintentos
     b=await req('register',{body:{email:`b-${randomUUID()}@example.test`,password:'Password-test-2026',name:'Entrenador B',teamName:'Equipo B'}});
     assert.equal(a.status,201);assert.equal(b.status,201);users.push(a.data.user.id,b.data.user.id);
     assert.match(a.cookie,/minuto_session=[a-f0-9]{64}/);assert.notEqual(a.cookie,b.cookie);
-    assert.equal((await req('team',{cookie:a.cookie})).data.team.settings.name,'Equipo A');assert.equal((await req('team',{cookie:b.cookie})).data.team.settings.name,'Equipo B');
+    assert.equal((await req('team',{cookie:a.cookie})).data.workspace.teams[0].settings.name,'Equipo A');assert.equal((await req('team',{cookie:b.cookie})).data.workspace.teams[0].settings.name,'Equipo B');
   });
   await t.test('rechaza origen ajeno y entrada inválida',async()=>{
     assert.equal((await req('command',{cookie:a.cookie,origin:'https://evil.example',body:{type:'settings'}})).status,403);
     assert.equal((await req('register',{body:{email:'invalid',password:'short'}})).status,400);
   });
   await t.test('guarda, deduplica el reintento y rechaza revisiones antiguas',async()=>{
-    const team=(await req('team',{cookie:a.cookie})).data.team;
-    const command={type:'player.save',teamId:team.id,revision:team.revision,operationId:randomUUID(),payload:{name:'Jugador Prueba',number:7,position:'MED'}};
-    const saved=await req('command',{cookie:a.cookie,body:command});assert.equal(saved.status,200);assert.equal(saved.data.team.players.length,1);
-    const retry=await req('command',{cookie:a.cookie,body:command});assert.equal(retry.status,200);assert.equal(retry.data.team.players.length,1);
+    const workspace=(await req('team',{cookie:a.cookie})).data.workspace,team=workspace.teams[0];
+    const command={type:'player.save',workspaceId:workspace.id,teamId:team.id,revision:workspace.revision,operationId:randomUUID(),payload:{name:'Jugador Prueba',number:7,position:'MED'}};
+    const saved=await req('command',{cookie:a.cookie,body:command});assert.equal(saved.status,200);assert.equal(saved.data.workspace.teams[0].players.length,1);
+    const retry=await req('command',{cookie:a.cookie,body:command});assert.equal(retry.status,200);assert.equal(retry.data.workspace.teams[0].players.length,1);
     const stale=await req('command',{cookie:a.cookie,body:{...command,operationId:randomUUID()}});assert.equal(stale.status,409);
-    assert.equal((await req('team',{cookie:b.cookie})).data.team.players.length,0);
+    assert.equal((await req('team',{cookie:b.cookie})).data.workspace.teams[0].players.length,0);
   });
   await t.test('un comando de otra pestaña no puede modificar el equipo de otra cuenta',async()=>{
-    const team=(await req('team',{cookie:a.cookie})).data.team;
-    const result=await req('command',{cookie:b.cookie,body:{type:'player.save',teamId:team.id,revision:0,operationId:randomUUID(),payload:{name:'No debe entrar',number:8,position:'DEF'}}});assert.equal(result.status,409);
+    const workspace=(await req('team',{cookie:a.cookie})).data.workspace;
+    const result=await req('command',{cookie:b.cookie,body:{type:'player.save',workspaceId:workspace.id,teamId:workspace.teams[0].id,revision:0,operationId:randomUUID(),payload:{name:'No debe entrar',number:8,position:'DEF'}}});assert.equal(result.status,409);
   });
   await t.test('serializa dos escrituras simultáneas con la misma revisión',async()=>{
-    const team=await store.team(a.data.user.id);const base={type:'player.save',teamId:team.id,revision:team.revision};
+    const workspace=await store.workspace(a.data.user.id);const base={type:'player.save',workspaceId:workspace.id,teamId:workspace.teams[0].id,revision:workspace.revision};
     const results=await Promise.allSettled([store.command(a.data.user.id,{...base,operationId:randomUUID(),payload:{name:'Jugador Dos',number:2,position:'DEF'}}),store.command(a.data.user.id,{...base,operationId:randomUUID(),payload:{name:'Jugador Tres',number:3,position:'DEF'}})]);
-    assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal(results.find(r=>r.status==='rejected').reason.status,409);assert.equal((await store.team(a.data.user.id)).players.length,2);
+    assert.equal(results.filter(r=>r.status==='fulfilled').length,1);assert.equal(results.find(r=>r.status==='rejected').reason.status,409);assert.equal((await store.workspace(a.data.user.id)).teams[0].players.length,2);
   });
   await t.test('un partido y sus intervalos sobreviven a una nueva instancia de store',async()=>{
-    let team=await store.team(a.data.user.id);
-    const command=async(type,payload)=>{team=await store.command(a.data.user.id,{type,payload,teamId:team.id,revision:team.revision,operationId:randomUUID()});};
+    let workspace=await store.workspace(a.data.user.id);const teamId=workspace.teams[0].id;
+    const command=async(type,payload)=>{workspace=await store.command(a.data.user.id,{type,payload,workspaceId:workspace.id,teamId,revision:workspace.revision,operationId:randomUUID()});};
     await command('fixture.save',{opponent:'Rival de prueba',date:'2026-09-20T18:00:00Z',home:true,round:1,season:'2026/27'});
-    const matchId=team.matches[0].id;await command('match.lineup',{matchId,playerIds:[team.players[0].id]});await command('match.start',{matchId});
-    const second=await createStore({pool});const recovered=await second.team(a.data.user.id);assert.equal(recovered.matches[0].status,'live');assert.equal(recovered.matches[0].stints.length,1);assert.ok(recovered.matches[0].runningSince);
-    await command('match.substitute',{matchId,outId:team.players[0].id,inId:team.players[1].id});await command('match.finish',{matchId});assert.equal(team.matches[0].status,'finished');assert.ok(team.matches[0].stints.every(s=>s.outSeconds!==null));
+    const team=()=>workspace.teams.find(t=>t.id===teamId);
+    const matchId=team().matches[0].id;await command('match.lineup',{matchId,playerIds:[team().players[0].id]});await command('match.start',{matchId});
+    const second=await createStore({pool});const recovered=await second.workspace(a.data.user.id);const recoveredTeam=recovered.teams.find(t=>t.id===teamId);assert.equal(recoveredTeam.matches[0].status,'live');assert.equal(recoveredTeam.matches[0].stints.length,1);assert.ok(recoveredTeam.matches[0].runningSince);
+    await command('match.substitute',{matchId,outId:team().players[0].id,inId:team().players[1].id});await command('match.finish',{matchId});assert.equal(team().matches[0].status,'finished');assert.ok(team().matches[0].stints.every(s=>s.outSeconds!==null));
   });
   await t.test('login valida contraseña y logout revoca la sesión',async()=>{
     assert.equal((await req('login',{body:{email:a.data.user.email,password:'wrong-password-2026'}})).status,401);

@@ -1,8 +1,8 @@
 import { createHash, randomBytes, randomUUID, scrypt as scryptCb, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import { Pool } from 'pg';
-import { AppError, applyCommand, emptyTeam } from './domain.js';
-import { demoTeam } from './seed.js';
+import { AppError, applyCommand, emptyWorkspace } from './domain.js';
+import { demoWorkspace } from './seed.js';
 const scrypt = promisify(scryptCb);
 const tokenHash = value => createHash('sha256').update(value).digest('hex');
 export async function hashPassword(password) {
@@ -33,20 +33,40 @@ CREATE TABLE IF NOT EXISTS minuto_commands (
   user_id UUID NOT NULL REFERENCES minuto_users(id) ON DELETE CASCADE,
   operation_id UUID NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY(user_id, operation_id)
-);`;
+);
+CREATE TABLE IF NOT EXISTS minuto_assets (
+  id UUID PRIMARY KEY, user_id UUID NOT NULL REFERENCES minuto_users(id) ON DELETE CASCADE,
+  mime TEXT NOT NULL, bytes BYTEA NOT NULL, created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS minuto_assets_user ON minuto_assets(user_id);
+-- Migrate a pre-multiteam single-team blob (settings/players/matches at the top level) into a workspace.
+UPDATE minuto_teams SET data = jsonb_build_object(
+  'id', data->'id', 'revision', data->'revision', 'activeTeamId', data->'id',
+  'leagues', '[]'::jsonb,
+  'teams', jsonb_build_array(
+    (data - 'revision')
+    || jsonb_build_object('settings', (data->'settings') || jsonb_build_object(
+        'leagueIds', '[]'::jsonb, 'crestId', 'null'::jsonb,
+        'colors', jsonb_build_object('primary','#8ac9eb','secondary','#243944')
+      ))
+  )
+) WHERE data ? 'settings';`;
 
 export async function createStore({ demo = false, pool: providedPool } = {}) {
   if (demo) {
-    let team = demoTeam(); const seen = new Set();
+    let workspace = demoWorkspace(); const seen = new Set(); const assets = new Map();
     return { demo: true, health: async()=>true, close: async()=>{},
       session: async()=>({ id:'demo', name:'Entrenador', email:'demo@minuto.local' }),
-      team: async()=>structuredClone(team),
+      workspace: async()=>structuredClone(workspace),
       command: async(_id, body)=>{
-        if(body.teamId !== team.id) throw new AppError('El equipo activo ha cambiado. Recarga la página.',409);
-        if (seen.has(body.operationId)) return structuredClone(team);
-        if (body.revision !== team.revision) throw new AppError('Otro dispositivo ha actualizado el equipo. Revisa los datos e inténtalo de nuevo.',409);
-        team = applyCommand(team,body); seen.add(body.operationId); return structuredClone(team);
-      }
+        if(body.workspaceId !== workspace.id) throw new AppError('El equipo activo ha cambiado. Recarga la página.',409);
+        if (seen.has(body.operationId)) return structuredClone(workspace);
+        if (body.revision !== workspace.revision) throw new AppError('Otro dispositivo ha actualizado el equipo. Revisa los datos e inténtalo de nuevo.',409);
+        workspace = applyCommand(workspace,body); seen.add(body.operationId); return structuredClone(workspace);
+      },
+      putAsset: async(_id, mime, buffer)=>{ const id=randomUUID(); assets.set(id,{mime,bytes:buffer}); return id; },
+      getAsset: async(_id, assetId)=> assets.get(assetId) ?? null,
+      deleteAsset: async(_id, assetId)=>{ assets.delete(assetId); }
     };
   }
   if (!providedPool && !process.env.DATABASE_URL) throw new Error('Falta DATABASE_URL. Configura PostgreSQL o usa DEMO_MODE=true solo en desarrollo.');
@@ -61,7 +81,7 @@ export async function createStore({ demo = false, pool: providedPool } = {}) {
       try {
         await db.query('BEGIN');
         await db.query('INSERT INTO minuto_users(id,email,password_hash,name) VALUES ($1,$2,$3,$4)',[id,email,hash,name]);
-        await db.query('INSERT INTO minuto_teams(user_id,data) VALUES ($1,$2)',[id,JSON.stringify(emptyTeam(teamName))]);
+        await db.query('INSERT INTO minuto_teams(user_id,data) VALUES ($1,$2)',[id,JSON.stringify(emptyWorkspace(teamName))]);
         await db.query('COMMIT'); return {id,email,name};
       } catch(error) { await db.query('ROLLBACK'); if(error.code==='23505') throw new AppError('No se puede crear una cuenta con ese correo.',409); throw error; }
       finally { db.release(); }
@@ -86,23 +106,35 @@ export async function createStore({ demo = false, pool: providedPool } = {}) {
       return rows[0] ?? null;
     },
     async logout(token) { if(token) await pool.query('DELETE FROM minuto_sessions WHERE token_hash=$1',[tokenHash(token)]); },
-    async team(userId) { const {rows} = await pool.query('SELECT data FROM minuto_teams WHERE user_id=$1',[userId]); if(!rows[0]) throw new AppError('No se encuentra el equipo.',404); return rows[0].data; },
+    async workspace(userId) { const {rows} = await pool.query('SELECT data FROM minuto_teams WHERE user_id=$1',[userId]); if(!rows[0]) throw new AppError('No se encuentra el equipo.',404); return rows[0].data; },
     async command(userId,body) {
       const db = await pool.connect();
       try {
         await db.query('BEGIN');
         const {rows} = await db.query('SELECT data FROM minuto_teams WHERE user_id=$1 FOR UPDATE',[userId]);
         if(!rows[0]) throw new AppError('No se encuentra el equipo.',404);
-        const team = rows[0].data;
-        if(body.teamId !== team.id) throw new AppError('El equipo activo ha cambiado. Recarga la página.',409);
+        const workspace = rows[0].data;
+        if(body.workspaceId !== workspace.id) throw new AppError('El equipo activo ha cambiado. Recarga la página.',409);
         const seen = await db.query('SELECT 1 FROM minuto_commands WHERE user_id=$1 AND operation_id=$2',[userId,body.operationId]);
-        if(seen.rows.length) { await db.query('COMMIT'); return team; }
-        if(body.revision!==team.revision) throw new AppError('Otro dispositivo ha actualizado el equipo. Revisa los datos e inténtalo de nuevo.',409);
-        const state = applyCommand(team,body);
+        if(seen.rows.length) { await db.query('COMMIT'); return workspace; }
+        if(body.revision!==workspace.revision) throw new AppError('Otro dispositivo ha actualizado el equipo. Revisa los datos e inténtalo de nuevo.',409);
+        const state = applyCommand(workspace,body);
         await db.query('UPDATE minuto_teams SET data=$2 WHERE user_id=$1',[userId,JSON.stringify(state)]);
         await db.query('INSERT INTO minuto_commands(user_id,operation_id) VALUES ($1,$2)',[userId,body.operationId]);
         await db.query('COMMIT'); return state;
       } catch(error) { await db.query('ROLLBACK'); throw error; } finally { db.release(); }
+    },
+    async putAsset(userId, mime, buffer) {
+      const id = randomUUID();
+      await pool.query('INSERT INTO minuto_assets(id,user_id,mime,bytes) VALUES ($1,$2,$3,$4)',[id,userId,mime,buffer]);
+      return id;
+    },
+    async getAsset(userId, assetId) {
+      const {rows} = await pool.query('SELECT mime,bytes FROM minuto_assets WHERE id=$1 AND user_id=$2',[assetId,userId]);
+      return rows[0] ? { mime: rows[0].mime, bytes: rows[0].bytes } : null;
+    },
+    async deleteAsset(userId, assetId) {
+      await pool.query('DELETE FROM minuto_assets WHERE id=$1 AND user_id=$2',[assetId,userId]);
     }
   };
 }
