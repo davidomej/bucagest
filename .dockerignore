@@ -1,0 +1,12 @@
+node_modules
+dist
+.git
+.env
+.env.*
+*.log
+tests
+test-results
+.codex
+.agents
+.sites-runtime
+README.md

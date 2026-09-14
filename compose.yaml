@@ -1,0 +1,15 @@
+services:
+  app:
+    build: .
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      DATABASE_URL: ${DATABASE_URL:?Configura DATABASE_URL con la conexión a PostgreSQL}
+      APP_ORIGIN: ${APP_ORIGIN:?Configura APP_ORIGIN con el dominio HTTPS sin barra final}
+      ALLOW_REGISTRATION: ${ALLOW_REGISTRATION:-true}
+      DATABASE_SSL_CA: ${DATABASE_SSL_CA:-}
+      NODE_ENV: production
+      PORT: 3000
+    restart: unless-stopped
+# PostgreSQL se administra por separado en Coolify.
+# La aplicación y la base deben compartir red o tener conectividad entre sí.
