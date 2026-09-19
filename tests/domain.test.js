@@ -184,3 +184,35 @@ test('normalizeWorkspace rellena en partidos y jugadores los campos que no exist
   const matchId=normalizedTeam.matches[0].id,teamId=team.id;
   assert.doesNotThrow(()=>applyCommand(normalized,{type:'match.substitute',teamId,payload:{matchId,outId:normalizedTeam.players[0].id}}));
 });
+test('un gol propio se asigna a goleador y asistencia y suma en el marcador correcto',()=>{
+  const f=fixture();const ids=f.ids;
+  f.command('match.start');
+  f.command('match.goal',{scorerId:ids[4],assistId:ids[5]},60000);
+  assert.equal(f.match.homeScore,1);assert.equal(f.match.awayScore,0);
+  const goal=f.match.events[0];
+  assert.equal(goal.kind,'goal');assert.equal(goal.forUs,true);assert.equal(goal.scorerId,ids[4]);assert.equal(goal.assistId,ids[5]);
+});
+test('un gol sin asistencia se registra con assistId nulo',()=>{
+  const f=fixture();const ids=f.ids;
+  f.command('match.start');
+  f.command('match.goal',{scorerId:ids[4]},60000);
+  assert.equal(f.match.events[0].assistId,null);
+});
+test('el goleador y la asistencia deben estar en el campo',()=>{
+  const f=fixture();const ids=f.ids;
+  f.command('match.start');
+  assert.throws(()=>f.command('match.goal',{scorerId:ids[7]},60000),/goleador/);
+  assert.throws(()=>f.command('match.goal',{scorerId:ids[4],assistId:ids[7]},60000),/asistencia/);
+  assert.throws(()=>f.command('match.goal',{scorerId:ids[4],assistId:ids[4]},60000),/asistencia/);
+});
+test('restar un gol propio con los controles del marcador deshace el último gol asignado',()=>{
+  const f=fixture();const ids=f.ids;
+  f.command('match.start');
+  f.command('match.goal',{scorerId:ids[4],assistId:ids[5]},60000);
+  f.command('match.goal',{scorerId:ids[6]},90000);
+  assert.equal(f.match.homeScore,2);
+  f.command('match.score',{homeScore:1,awayScore:0},100000);
+  assert.equal(f.match.homeScore,1);
+  assert.equal(f.match.events.filter(e=>e.kind==='goal').length,1);
+  assert.equal(f.match.events.find(e=>e.kind==='goal').scorerId,ids[4]);
+});

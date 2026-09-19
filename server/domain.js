@@ -211,7 +211,18 @@ export function applyCommand(original, command, now = Date.now()) {
         match.events.shift();
       } else if (type === 'match.score') {
         requireThat(['live', 'paused'].includes(match.status), 'El partido no está en curso.');
-        Object.assign(match, z.object({ homeScore: z.number().int().min(0).max(99), awayScore: z.number().int().min(0).max(99) }).parse(payload));
+        const { homeScore, awayScore } = z.object({ homeScore: z.number().int().min(0).max(99), awayScore: z.number().int().min(0).max(99) }).parse(payload);
+        const ourPrev = match.home ? match.homeScore : match.awayScore, ourNext = match.home ? homeScore : awayScore;
+        if (ourNext < ourPrev) { const i = match.events.findIndex(e => e.kind === 'goal' && e.forUs); if (i >= 0) match.events.splice(i, 1); }
+        match.homeScore = homeScore; match.awayScore = awayScore;
+      } else if (type === 'match.goal') {
+        requireThat(['live', 'paused'].includes(match.status), 'El partido no está en curso.');
+        const { scorerId, assistId } = z.object({ scorerId: z.string(), assistId: z.string().nullable().optional() }).parse(payload);
+        const onField = activeIds();
+        requireThat(onField.includes(scorerId), 'El goleador debe estar en el campo.');
+        requireThat(!assistId || (assistId !== scorerId && onField.includes(assistId)), 'La asistencia debe ser otro jugador en el campo.');
+        if (match.home) match.homeScore += 1; else match.awayScore += 1;
+        event(match, 'goal', t, { forUs: true, scorerId, assistId: assistId || null });
       } else if (type === 'match.finish') {
         if (match.status === 'finished') return original;
         requireThat(['live', 'paused'].includes(match.status), 'El partido no ha comenzado.');
