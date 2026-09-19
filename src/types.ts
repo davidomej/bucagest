@@ -1,6 +1,7 @@
 export type Player = { id: string; name: string; number: number; position: 'POR'|'DEF'|'MED'|'DEL'; archived: boolean; birthdate: string|null; photoId: string|null };
 export type MatchEvent = { id: string; kind: string; seconds: number; outId?: string; inId?: string };
-export type Match = { id: string; opponent: string; date: string; venue: string; home: boolean; round: number; season: string; leagueId: string|null; status: 'scheduled'|'live'|'paused'|'finished'; elapsedSeconds: number; runningSince: number|null; period: number; pauseReason?: string; homeScore: number; awayScore: number; lineup: string[]; stints: {playerId: string; inSeconds: number; outSeconds: number|null}[]; events: MatchEvent[] };
+export type FormationKey = '1-2-3-1'|'1-3-2-1'|'1-3-1-2'|'1-2-2-2';
+export type Match = { id: string; opponent: string; date: string; venue: string; home: boolean; round: number; season: string; leagueId: string|null; status: 'scheduled'|'live'|'paused'|'finished'; elapsedSeconds: number; runningSince: number|null; period: number; pauseReason?: string; homeScore: number; awayScore: number; lineup: string[]; formation: FormationKey|null; positions: Record<string,string>; stints: {playerId: string; inSeconds: number; outSeconds: number|null}[]; events: MatchEvent[] };
 export type TeamColors = { primary: string; secondary: string };
 export type Settings = { name: string; leagueIds: string[]; season: string; playersOnField: number; matchMinutes: number; allowReentry: boolean; crestId: string|null; colors: TeamColors };
 export type Team = { id: string; settings: Settings; players: Player[]; matches: Match[] };

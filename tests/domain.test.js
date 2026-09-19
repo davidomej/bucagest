@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyCommand, emptyWorkspace, elapsed, playerSeconds } from '../server/domain.js';
+import { applyCommand, emptyWorkspace, elapsed, playerSeconds, FORMATIONS } from '../server/domain.js';
 
 function fixture(){
   let state=emptyWorkspace('Test FC');
@@ -97,4 +97,44 @@ test('las ligas se crean una vez y se comparten entre equipos del mismo entrenad
   state=applyCommand(state,{type:'league.delete',payload:{id:leagueId}});
   assert.equal(state.leagues.length,0);
   assert.deepEqual(state.teams.find(t=>t.id===firstId).settings.leagueIds,[]);
+});
+test('se puede asignar una formación de fútbol 7 con una posición por jugador',()=>{
+  const f=fixture();const ids=f.ids;
+  const slots=FORMATIONS['1-2-3-1'];
+  const positions=Object.fromEntries(ids.slice(0,7).map((id,i)=>[id,slots[i]]));
+  f.command('match.lineup',{playerIds:ids.slice(0,7),formation:'1-2-3-1',positions});
+  assert.equal(f.match.formation,'1-2-3-1');
+  assert.equal(f.match.positions[ids[0]],'POR');
+  assert.throws(()=>f.command('match.lineup',{playerIds:ids.slice(0,7),formation:'1-2-3-1',positions:{[ids[0]]:'POR',[ids[1]]:'POR'}}),/misma posición/);
+  assert.throws(()=>f.command('match.lineup',{playerIds:ids.slice(0,7),formation:'1-2-3-1',positions:{[ids[0]]:'ALA'}}),/no válida/);
+});
+test('un jugador de campo puede sustituir al portero lesionado y hereda su posición',()=>{
+  const f=fixture();const ids=f.ids;
+  const slots=FORMATIONS['1-2-3-1'];
+  const positions=Object.fromEntries(ids.slice(0,7).map((id,i)=>[id,slots[i]]));
+  f.command('match.lineup',{playerIds:ids.slice(0,7),formation:'1-2-3-1',positions});
+  f.command('match.start');
+  // El portero (ids[0]) sale lesionado; el jugador de banquillo ids[7] entra en su lugar.
+  f.command('match.substitute',{outId:ids[0],inId:ids[7]},100000);
+  assert.equal(f.match.positions[ids[7]],'POR');
+  assert.equal(f.match.positions[ids[0]],undefined);
+  // Deshacer restaura al portero original en su posición y quita al suplente.
+  f.command('match.undo',{},120000);
+  assert.equal(f.match.positions[ids[0]],'POR');
+  assert.equal(f.match.positions[ids[7]],undefined);
+});
+test('una sustitución puede colocar al jugador entrante en una posición distinta a la del saliente',()=>{
+  const f=fixture();const ids=f.ids;
+  const slots=FORMATIONS['1-2-3-1'];
+  const positions=Object.fromEntries(ids.slice(0,7).map((id,i)=>[id,slots[i]]));
+  f.command('match.lineup',{playerIds:ids.slice(0,7),formation:'1-2-3-1',positions});
+  f.command('match.start');
+  f.command('match.substitute',{outId:ids[1],inId:ids[7],slot:'DEF1'},100000);
+  assert.equal(f.match.positions[ids[7]],'DEF1');
+  assert.throws(()=>f.command('match.substitute',{outId:ids[2],inId:ids[8],slot:'DEF1'},150000),/ocupada/);
+});
+test('las formaciones solo están disponibles en fútbol 7',()=>{
+  const f=fixture();
+  f.command('settings',{...f.settings,playersOnField:5});
+  assert.throws(()=>f.command('match.lineup',{playerIds:f.ids.slice(0,5),formation:'1-2-3-1'}),/fútbol 7/);
 });

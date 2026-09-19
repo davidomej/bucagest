@@ -13,6 +13,15 @@ const fixtureSchema = z.object({ opponent: text, date: z.iso.datetime({ offset: 
 const colorsSchema = z.object({ primary: hexColor, secondary: hexColor });
 const settingsSchema = z.object({ name: text, leagueIds: z.array(z.uuid()).max(10).default([]), season: text, playersOnField: z.union([z.literal(5), z.literal(7), z.literal(8), z.literal(11)]), matchMinutes: z.number().int().min(10).max(180), allowReentry: z.boolean(), crestId: assetId, colors: colorsSchema.default({ primary: '#8ac9eb', secondary: '#243944' }) });
 const leagueSchema = z.object({ name: text, season: text, color: hexColor });
+// Fútbol 7 formations: goalkeeper slot plus six outfield slots, arranged defence→attack.
+export const FORMATIONS = {
+  '1-2-3-1': ['POR', 'DEF1', 'DEF2', 'MED1', 'MED2', 'MED3', 'DEL1'],
+  '1-3-2-1': ['POR', 'DEF1', 'DEF2', 'DEF3', 'MED1', 'MED2', 'DEL1'],
+  '1-3-1-2': ['POR', 'DEF1', 'DEF2', 'DEF3', 'MED1', 'DEL1', 'DEL2'],
+  '1-2-2-2': ['POR', 'DEF1', 'DEF2', 'MED1', 'MED2', 'DEL1', 'DEL2'],
+};
+const formationKey = z.enum(Object.keys(FORMATIONS));
+const slotValue = z.string().trim().min(1).max(20);
 export function elapsed(match, now = Date.now()) {
   return match.elapsedSeconds + (match.runningSince === null ? 0 : Math.max(0, now - match.runningSince) / 1000);
 }
@@ -96,7 +105,7 @@ export function applyCommand(original, command, now = Date.now()) {
           const match = team.matches.find(m => m.id === payload.id);
           requireThat(match?.status === 'scheduled', 'Solo puedes editar partidos pendientes.');
           Object.assign(match, data);
-        } else team.matches.push({ ...data, id: randomUUID(), status: 'scheduled', elapsedSeconds: 0, runningSince: null, period: 1, homeScore: 0, awayScore: 0, lineup: [], stints: [], events: [] });
+        } else team.matches.push({ ...data, id: randomUUID(), status: 'scheduled', elapsedSeconds: 0, runningSince: null, period: 1, homeScore: 0, awayScore: 0, lineup: [], formation: null, positions: {}, stints: [], events: [] });
       }
     } else if (type === 'fixture.delete') {
       const match = team.matches.find(m => m.id === payload.id);
@@ -115,6 +124,27 @@ export function applyCommand(original, command, now = Date.now()) {
         const ids = z.array(z.string()).max(team.settings.playersOnField).parse(payload.playerIds);
         requireThat(new Set(ids).size === ids.length && ids.every(id => team.players.some(p => p.id === id && !p.archived)), 'La alineación no es válida.');
         match.lineup = ids;
+        if (payload.formation !== undefined) {
+          const formation = payload.formation === null ? null : formationKey.parse(payload.formation);
+          requireThat(!formation || team.settings.playersOnField === 7, 'Las formaciones solo están disponibles en fútbol 7.');
+          match.formation = formation;
+          if (!formation) match.positions = {};
+        }
+        if (payload.positions !== undefined) {
+          const positions = z.record(z.string(), slotValue).parse(payload.positions);
+          const slots = match.formation ? FORMATIONS[match.formation] : null;
+          requireThat(slots || Object.keys(positions).length === 0, 'Selecciona una formación antes de asignar posiciones.');
+          const usedSlots = new Set();
+          for (const [playerId, slot] of Object.entries(positions)) {
+            requireThat(ids.includes(playerId), 'Solo puedes colocar a jugadores de la alineación.');
+            requireThat(slots.includes(slot), 'Posición no válida para la formación elegida.');
+            requireThat(!usedSlots.has(slot), 'Dos jugadores no pueden ocupar la misma posición.');
+            usedSlots.add(slot);
+          }
+          match.positions = positions;
+        } else {
+          match.positions = Object.fromEntries(Object.entries(match.positions).filter(([id]) => ids.includes(id)));
+        }
       } else if (type === 'match.start') {
         requireThat(match.status === 'scheduled', 'El partido ya ha comenzado.');
         requireThat(!team.matches.some(m => ['live', 'paused'].includes(m.status)), 'Ya hay otro partido en curso.');
@@ -142,16 +172,25 @@ export function applyCommand(original, command, now = Date.now()) {
           requireThat(onField.length - (payload.outId ? 1 : 0) < team.settings.playersOnField, 'El campo está completo. Selecciona también quién sale.');
           requireThat(team.settings.allowReentry || !match.stints.some(s => s.playerId === payload.inId), 'Esta competición no permite reentradas.');
         }
-        if (payload.outId) match.stints.find(s => s.playerId === payload.outId && s.outSeconds === null).outSeconds = t;
-        if (payload.inId) match.stints.push({ playerId: payload.inId, inSeconds: t, outSeconds: null });
-        event(match, 'substitution', t, { outId: payload.outId || null, inId: payload.inId || null });
+        const outSlot = payload.outId ? (match.positions[payload.outId] ?? null) : null;
+        let slot = null;
+        if (payload.inId) {
+          slot = payload.slot !== undefined ? (payload.slot === null ? null : slotValue.parse(payload.slot)) : outSlot;
+          if (slot) {
+            requireThat(!match.formation || FORMATIONS[match.formation].includes(slot), 'Posición no válida para la formación elegida.');
+            requireThat(!onField.some(id => id !== payload.outId && match.positions[id] === slot), 'Esa posición ya está ocupada.');
+          }
+        }
+        if (payload.outId) { match.stints.find(s => s.playerId === payload.outId && s.outSeconds === null).outSeconds = t; delete match.positions[payload.outId]; }
+        if (payload.inId) { match.stints.push({ playerId: payload.inId, inSeconds: t, outSeconds: null }); if (slot) match.positions[payload.inId] = slot; }
+        event(match, 'substitution', t, { outId: payload.outId || null, inId: payload.inId || null, outSlot, slot });
       } else if (type === 'match.undo') {
         requireThat(['live', 'paused'].includes(match.status), 'El partido no está en curso.');
         const last = match.events[0];
         requireThat(last?.kind === 'substitution', 'Solo puedes deshacer la última acción si fue una sustitución.');
         if (last.outId) requireThat(team.players.some(p => p.id === last.outId && !p.archived), 'No puedes devolver al campo a un jugador archivado.');
-        if (last.inId) { const i = match.stints.findLastIndex(s => s.playerId === last.inId && s.outSeconds === null); requireThat(i >= 0, 'El estado ha cambiado.'); match.stints.splice(i, 1); }
-        if (last.outId) { const stint = match.stints.findLast(s => s.playerId === last.outId && s.outSeconds === last.seconds); requireThat(stint, 'El estado ha cambiado.'); stint.outSeconds = null; }
+        if (last.inId) { const i = match.stints.findLastIndex(s => s.playerId === last.inId && s.outSeconds === null); requireThat(i >= 0, 'El estado ha cambiado.'); match.stints.splice(i, 1); delete match.positions[last.inId]; }
+        if (last.outId) { const stint = match.stints.findLast(s => s.playerId === last.outId && s.outSeconds === last.seconds); requireThat(stint, 'El estado ha cambiado.'); stint.outSeconds = null; if (last.outSlot) match.positions[last.outId] = last.outSlot; }
         match.events.shift();
       } else if (type === 'match.score') {
         requireThat(['live', 'paused'].includes(match.status), 'El partido no está en curso.');
