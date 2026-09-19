@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { applyCommand, emptyWorkspace, elapsed, playerSeconds, FORMATIONS } from '../server/domain.js';
+import { applyCommand, emptyWorkspace, elapsed, playerSeconds, FORMATIONS, normalizeWorkspace } from '../server/domain.js';
 
 function fixture(){
   let state=emptyWorkspace('Test FC');
@@ -165,4 +165,22 @@ test('se puede borrar un partido aplazado igual que uno pendiente',()=>{
   const before=f.matches.length;
   f.command('fixture.delete',{id:f.match.id});
   assert.equal(f.matches.length,before-1);
+});
+test('normalizeWorkspace rellena en partidos y jugadores los campos que no existían antes de esa función',()=>{
+  const f=fixture();
+  f.command('match.start');
+  const team=f.state.teams.find(t=>t.id===f.state.activeTeamId);
+  // Simula datos guardados en la base de datos antes de que existieran formaciones, ligas y fotos.
+  delete team.matches[0].formation; delete team.matches[0].positions; delete team.matches[0].leagueId;
+  delete team.players[0].birthdate; delete team.players[0].photoId;
+  const normalized=normalizeWorkspace(f.state);
+  const normalizedTeam=normalized.teams.find(t=>t.id===team.id);
+  assert.equal(normalizedTeam.matches[0].formation,null);
+  assert.deepEqual(normalizedTeam.matches[0].positions,{});
+  assert.equal(normalizedTeam.matches[0].leagueId,null);
+  assert.equal(normalizedTeam.players[0].birthdate,null);
+  assert.equal(normalizedTeam.players[0].photoId,null);
+  // Un comando que toca match.positions ya no debe fallar sobre un partido "antiguo" normalizado.
+  const matchId=normalizedTeam.matches[0].id,teamId=team.id;
+  assert.doesNotThrow(()=>applyCommand(normalized,{type:'match.substitute',teamId,payload:{matchId,outId:normalizedTeam.players[0].id}}));
 });

@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID, scrypt as scryptCb, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 import { Pool } from 'pg';
-import { AppError, applyCommand, emptyWorkspace } from './domain.js';
+import { AppError, applyCommand, emptyWorkspace, normalizeWorkspace } from './domain.js';
 import { demoWorkspace } from './seed.js';
 const scrypt = promisify(scryptCb);
 const tokenHash = value => createHash('sha256').update(value).digest('hex');
@@ -54,7 +54,7 @@ UPDATE minuto_teams SET data = jsonb_build_object(
 
 export async function createStore({ demo = false, pool: providedPool } = {}) {
   if (demo) {
-    let workspace = demoWorkspace(); const seen = new Set(); const assets = new Map();
+    let workspace = normalizeWorkspace(demoWorkspace()); const seen = new Set(); const assets = new Map();
     return { demo: true, health: async()=>true, close: async()=>{},
       session: async()=>({ id:'demo', name:'Entrenador', email:'demo@minuto.local' }),
       workspace: async()=>structuredClone(workspace),
@@ -106,14 +106,14 @@ export async function createStore({ demo = false, pool: providedPool } = {}) {
       return rows[0] ?? null;
     },
     async logout(token) { if(token) await pool.query('DELETE FROM minuto_sessions WHERE token_hash=$1',[tokenHash(token)]); },
-    async workspace(userId) { const {rows} = await pool.query('SELECT data FROM minuto_teams WHERE user_id=$1',[userId]); if(!rows[0]) throw new AppError('No se encuentra el equipo.',404); return rows[0].data; },
+    async workspace(userId) { const {rows} = await pool.query('SELECT data FROM minuto_teams WHERE user_id=$1',[userId]); if(!rows[0]) throw new AppError('No se encuentra el equipo.',404); return normalizeWorkspace(rows[0].data); },
     async command(userId,body) {
       const db = await pool.connect();
       try {
         await db.query('BEGIN');
         const {rows} = await db.query('SELECT data FROM minuto_teams WHERE user_id=$1 FOR UPDATE',[userId]);
         if(!rows[0]) throw new AppError('No se encuentra el equipo.',404);
-        const workspace = rows[0].data;
+        const workspace = normalizeWorkspace(rows[0].data);
         if(body.workspaceId !== workspace.id) throw new AppError('El equipo activo ha cambiado. Recarga la página.',409);
         const seen = await db.query('SELECT 1 FROM minuto_commands WHERE user_id=$1 AND operation_id=$2',[userId,body.operationId]);
         if(seen.rows.length) { await db.query('COMMIT'); return workspace; }

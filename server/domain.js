@@ -39,6 +39,22 @@ export function emptyWorkspace(name) {
   const team = emptyTeamRecord(name);
   return { id: randomUUID(), revision: 0, activeTeamId: team.id, leagues: [], teams: [team] };
 }
+// Backfills fields added to nested match/player records after some rows were already persisted,
+// so stored JSONB from before a feature shipped doesn't crash reads or commands on old matches.
+export function normalizeWorkspace(data) {
+  for (const team of data.teams) {
+    for (const match of team.matches) {
+      if (match.formation === undefined) match.formation = null;
+      if (!match.positions) match.positions = {};
+      if (match.leagueId === undefined) match.leagueId = null;
+    }
+    for (const player of team.players) {
+      if (player.birthdate === undefined) player.birthdate = null;
+      if (player.photoId === undefined) player.photoId = null;
+    }
+  }
+  return data;
+}
 const requireThat = (value, message) => { if (!value) throw new AppError(message); };
 function event(match, kind, seconds, data = {}) { match.events.unshift({ id: randomUUID(), kind, seconds, ...data }); }
 function findTeam(state, teamId) {
