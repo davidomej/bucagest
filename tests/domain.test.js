@@ -138,3 +138,31 @@ test('las formaciones solo están disponibles en fútbol 7',()=>{
   f.command('settings',{...f.settings,playersOnField:5});
   assert.throws(()=>f.command('match.lineup',{playerIds:f.ids.slice(0,5),formation:'1-2-3-1'}),/fútbol 7/);
 });
+test('un partido pendiente se puede aplazar y no se puede iniciar mientras está aplazado',()=>{
+  const f=fixture();
+  f.command('match.postpone');
+  assert.equal(f.match.status,'postponed');
+  assert.throws(()=>f.command('match.start'),/aplazado/);
+  assert.throws(()=>f.command('match.lineup',{playerIds:f.ids.slice(0,7)}),/aplazado/);
+});
+test('no se puede aplazar un partido que ya está en curso o finalizado',()=>{
+  const f=fixture();
+  f.command('match.start');
+  assert.throws(()=>f.command('match.postpone'),/pendientes/);
+  f.command('match.finish');
+  assert.throws(()=>f.command('match.postpone'),/pendientes/);
+});
+test('reprogramar un partido aplazado con una nueva fecha lo deja pendiente de nuevo',()=>{
+  const f=fixture();
+  f.command('match.postpone');
+  f.command('fixture.save',{id:f.match.id,opponent:'Rival',date:'2026-10-05T18:00:00Z',venue:'Municipal',home:true,round:1,season:'2026/27'});
+  assert.equal(f.match.status,'scheduled');
+  assert.equal(f.match.date,'2026-10-05T18:00:00Z');
+});
+test('se puede borrar un partido aplazado igual que uno pendiente',()=>{
+  const f=fixture();
+  f.command('match.postpone');
+  const before=f.matches.length;
+  f.command('fixture.delete',{id:f.match.id});
+  assert.equal(f.matches.length,before-1);
+});

@@ -103,13 +103,14 @@ export function applyCommand(original, command, now = Date.now()) {
         requireThat(!data.leagueId || state.leagues.some(l => l.id === data.leagueId), 'Selecciona una competición válida.');
         if (type === 'fixture.save' && payload.id) {
           const match = team.matches.find(m => m.id === payload.id);
-          requireThat(match?.status === 'scheduled', 'Solo puedes editar partidos pendientes.');
+          requireThat(match && ['scheduled', 'postponed'].includes(match.status), 'Solo puedes editar partidos pendientes o aplazados.');
           Object.assign(match, data);
+          match.status = 'scheduled';
         } else team.matches.push({ ...data, id: randomUUID(), status: 'scheduled', elapsedSeconds: 0, runningSince: null, period: 1, homeScore: 0, awayScore: 0, lineup: [], formation: null, positions: {}, stints: [], events: [] });
       }
     } else if (type === 'fixture.delete') {
       const match = team.matches.find(m => m.id === payload.id);
-      requireThat(match?.status === 'scheduled', 'Solo puedes borrar partidos pendientes.');
+      requireThat(match && ['scheduled', 'postponed'].includes(match.status), 'Solo puedes borrar partidos pendientes o aplazados.');
       team.matches = team.matches.filter(m => m.id !== payload.id);
     } else {
       const match = team.matches.find(m => m.id === payload.matchId);
@@ -120,7 +121,7 @@ export function applyCommand(original, command, now = Date.now()) {
       if (match.runningSince !== null) match.runningSince = now;
       const activeIds = () => match.stints.filter(s => s.outSeconds === null).map(s => s.playerId);
       if (type === 'match.lineup') {
-        requireThat(match.status === 'scheduled', 'El partido ya ha comenzado.');
+        requireThat(match.status === 'scheduled', match.status === 'postponed' ? 'Este partido está aplazado. Ponle una nueva fecha antes de continuar.' : 'El partido ya ha comenzado.');
         const ids = z.array(z.string()).max(team.settings.playersOnField).parse(payload.playerIds);
         requireThat(new Set(ids).size === ids.length && ids.every(id => team.players.some(p => p.id === id && !p.archived)), 'La alineación no es válida.');
         match.lineup = ids;
@@ -146,7 +147,7 @@ export function applyCommand(original, command, now = Date.now()) {
           match.positions = Object.fromEntries(Object.entries(match.positions).filter(([id]) => ids.includes(id)));
         }
       } else if (type === 'match.start') {
-        requireThat(match.status === 'scheduled', 'El partido ya ha comenzado.');
+        requireThat(match.status === 'scheduled', match.status === 'postponed' ? 'Este partido está aplazado. Ponle una nueva fecha antes de continuar.' : 'El partido ya ha comenzado.');
         requireThat(!team.matches.some(m => ['live', 'paused'].includes(m.status)), 'Ya hay otro partido en curso.');
         requireThat(match.lineup.length > 0 && match.lineup.length <= team.settings.playersOnField, 'Selecciona los titulares antes de iniciar.');
         requireThat(match.lineup.every(id => team.players.some(p => p.id === id && !p.archived)), 'Revisa la alineación: contiene jugadores archivados.');
@@ -200,6 +201,9 @@ export function applyCommand(original, command, now = Date.now()) {
         requireThat(['live', 'paused'].includes(match.status), 'El partido no ha comenzado.');
         match.stints.filter(s => s.outSeconds === null).forEach(s => { s.outSeconds = t; });
         match.elapsedSeconds = t; match.runningSince = null; match.status = 'finished'; match.finishedAt = new Date(now).toISOString(); event(match, 'finish', t);
+      } else if (type === 'match.postpone') {
+        requireThat(match.status === 'scheduled', 'Solo puedes aplazar partidos pendientes.');
+        match.status = 'postponed';
       } else throw new AppError('Acción desconocida.');
     }
   }
