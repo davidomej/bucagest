@@ -10,8 +10,9 @@ App web en español para gestionar un equipo de fútbol, su calendario y los min
 - Calendario manual e importación CSV con plantilla descargable y validación previa.
 - Selección y guardado de titulares antes del partido.
 - Cronómetro del servidor que sobrevive a recargas, cierre del navegador y reinicio de la aplicación.
-- Pausa, descanso, segunda parte, marcador, salida con un toque y sustitución simultánea de dos jugadores.
+- Pausa, descanso, segunda parte, marcador y sustituciones rápidas: pulsa en quien sale y toca al compañero que entró.
 - Reentradas que suman distintos intervalos y opción de deshacer la última sustitución.
+- Cobros por equipo y temporada: ficha, seguro, uniforme pagado y entregado y cuotas de enero a diciembre. Cada casilla requiere pulsarla y confirmar el aviso, tanto para marcar como para desmarcar; cancelar el aviso no modifica el registro. Historial de temporadas y jugadores archivados conservado en PostgreSQL.
 - Finalización que cierra los intervalos y acumula los minutos de la temporada. El partido finalizado queda cerrado.
 - Estadísticas por temporada y exportación CSV, incluyendo segundos exactos.
 
@@ -67,7 +68,7 @@ La demo contiene un equipo ficticio y datos temporales en memoria, compartidos e
 
 1. Abre un partido del calendario. Selecciona titulares y usa **Guardar alineación** si lo prepararás antes del día del partido.
 2. Con el pitido inicial, pulsa **Iniciar partido**. Si eliges menos jugadores que la modalidad configurada, la app te avisa antes de iniciar.
-3. Cuando salga un jugador, búscalo por nombre o dorsal y pulsa **Sustituido**. Se registra el instante de recepción en el servidor. En **Banquillo**, pulsa **Entrar** para registrar al sustituto. Usa **Cambio** si ambos deben compartir exactamente el mismo instante.
+3. Cuando salga un jugador, búscalo por nombre o dorsal en **En el campo** y pulsa **Sustituir**. Aparecerá **¿Quién entró por ti?**: toca al compañero disponible y el cambio se guarda directamente, sin otra confirmación ni preguntas sobre posiciones. La salida y la entrada comparten el instante de recepción en el servidor; el entrante hereda automáticamente la posición del saliente. Cancelar no registra ningún cambio. Si comenzaste con menos jugadores, puedes completar el campo desde **Banquillo → Entrar**.
 4. Pulsa **Descanso** al terminar la primera parte y **Iniciar segunda parte** al volver. El descanso no suma minutos. El tiempo continúa desde donde se detuvo; no se redondea a una duración reglamentaria.
 5. Pulsa **Finalizar partido** y confirma. Las estadísticas de temporada incluyen solo los partidos finalizados; el directo tiene su propio cómputo.
 

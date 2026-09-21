@@ -57,6 +57,19 @@ test('API y persistencia: autenticación, aislamiento, concurrencia y reintentos
     const second=await createStore({pool});const recovered=await second.workspace(a.data.user.id);const recoveredTeam=recovered.teams.find(t=>t.id===teamId);assert.equal(recoveredTeam.matches[0].status,'live');assert.equal(recoveredTeam.matches[0].stints.length,1);assert.ok(recoveredTeam.matches[0].runningSince);
     await command('match.substitute',{matchId,outId:team().players[0].id,inId:team().players[1].id});await command('match.finish',{matchId});assert.equal(team().matches[0].status,'finished');assert.ok(team().matches[0].stints.every(s=>s.outSeconds!==null));
   });
+  await t.test('cobros persisten, deduplican reintentos y separan equipos y temporadas',async()=>{
+    const workspace=await store.workspace(a.data.user.id),team=workspace.teams[0];
+    const body={type:'payment.set',workspaceId:workspace.id,teamId:team.id,revision:workspace.revision,operationId:randomUUID(),payload:{playerId:team.players[0].id,season:'2026/27',field:'month1',value:true,expectedValue:false}};
+    const result=await req('command',{cookie:a.cookie,body});assert.equal(result.status,200);
+    const retry=await req('command',{cookie:a.cookie,body});assert.equal(retry.status,200);assert.equal(retry.data.workspace.revision,result.data.workspace.revision);
+    const recovered=await (await createStore({pool})).workspace(a.data.user.id);
+    assert.deepEqual(recovered.teams[0].payments,[{playerId:team.players[0].id,season:'2026/27',checks:{month1:true}}]);
+    assert.deepEqual((await store.workspace(b.data.user.id)).teams[0].payments,[]);
+    const unmark=await req('command',{cookie:a.cookie,body:{...body,revision:recovered.revision,operationId:randomUUID(),payload:{...body.payload,value:false,expectedValue:true}}});assert.equal(unmark.status,200);
+    assert.equal(unmark.data.workspace.teams[0].payments[0].checks.month1,false);
+    const nextSeason=await req('command',{cookie:a.cookie,body:{...body,revision:unmark.data.workspace.revision,operationId:randomUUID(),payload:{...body.payload,season:'2027/28'}}});assert.equal(nextSeason.status,200);
+    assert.equal(nextSeason.data.workspace.teams[0].payments[0].checks.month1,false);assert.equal(nextSeason.data.workspace.teams[0].payments[1].checks.month1,true);
+  });
   await t.test('login valida contraseña y logout revoca la sesión',async()=>{
     assert.equal((await req('login',{body:{email:a.data.user.email,password:'wrong-password-2026'}})).status,401);
     const login=await req('login',{body:{email:a.data.user.email,password:'Password-test-2026'}});assert.equal(login.status,200);

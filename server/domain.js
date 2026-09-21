@@ -13,6 +13,7 @@ const fixtureSchema = z.object({ opponent: text, date: z.iso.datetime({ offset: 
 const colorsSchema = z.object({ primary: hexColor, secondary: hexColor });
 const settingsSchema = z.object({ name: text, leagueIds: z.array(z.uuid()).max(10).default([]), season: text, playersOnField: z.union([z.literal(5), z.literal(7), z.literal(8), z.literal(11)]), matchMinutes: z.number().int().min(10).max(180), allowReentry: z.boolean(), crestId: assetId, colors: colorsSchema.default({ primary: '#8ac9eb', secondary: '#243944' }) });
 const leagueSchema = z.object({ name: text, season: text, color: hexColor });
+const paymentField = z.enum(['registration', 'insurance', 'uniformPaid', 'uniformDelivered', ...Array.from({length:12}, (_,i) => `month${i+1}`)]);
 // Fútbol 7 formations: goalkeeper slot plus six outfield slots, arranged defence→attack.
 export const FORMATIONS = {
   '1-2-3-1': ['POR', 'DEF1', 'DEF2', 'MED1', 'MED2', 'MED3', 'DEL1'],
@@ -30,7 +31,7 @@ export function playerSeconds(match, playerId, now = Date.now()) {
   return match.stints.filter(s => s.playerId === playerId).reduce((sum, s) => sum + Math.max(0, (s.outSeconds ?? end) - s.inSeconds), 0);
 }
 function emptyTeamRecord(name) {
-  return { id: randomUUID(), settings: { name, leagueIds: [], season: '2026/27', playersOnField: 7, matchMinutes: 60, allowReentry: true, crestId: null, colors: { primary: '#8ac9eb', secondary: '#243944' } }, players: [], matches: [] };
+  return { id: randomUUID(), settings: { name, leagueIds: [], season: '2026/27', playersOnField: 7, matchMinutes: 60, allowReentry: true, crestId: null, colors: { primary: '#8ac9eb', secondary: '#243944' } }, players: [], matches: [], payments: [] };
 }
 export function emptyTeam(name) {
   return emptyTeamRecord(name);
@@ -43,6 +44,7 @@ export function emptyWorkspace(name) {
 // so stored JSONB from before a feature shipped doesn't crash reads or commands on old matches.
 export function normalizeWorkspace(data) {
   for (const team of data.teams) {
+    if (!team.payments) team.payments = [];
     for (const match of team.matches) {
       if (match.formation === undefined) match.formation = null;
       if (!match.positions) match.positions = {};
@@ -101,6 +103,14 @@ export function applyCommand(original, command, now = Date.now()) {
       }
       requireThat(settings.leagueIds.every(id => state.leagues.some(l => l.id === id)), 'Selecciona una competición válida.');
       team.settings = settings;
+    } else if (type === 'payment.set') {
+      const {playerId, season, field, value, expectedValue} = z.object({playerId:z.uuid(), season:text, field:paymentField, value:z.boolean(), expectedValue:z.boolean()}).parse(payload);
+      requireThat(team.players.some(p => p.id === playerId), 'No se encuentra el jugador en este equipo.');
+      team.payments ??= [];
+      let record = team.payments.find(p => p.playerId === playerId && p.season === season);
+      if ((record?.checks[field] === true) !== expectedValue) throw new AppError('Este estado ha cambiado en otro dispositivo. Revísalo antes de confirmar de nuevo.', 409);
+      if (!record) { record = {playerId, season, checks:{}}; team.payments.push(record); }
+      record.checks[field] = value;
     } else if (type === 'player.save') {
       const value = playerSchema.parse(payload);
       requireThat(!team.players.some(p => p.id !== payload.id && !p.archived && p.number === value.number), 'Ese dorsal ya pertenece a otro jugador.');
