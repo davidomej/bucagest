@@ -29,7 +29,7 @@ export function PrivacyNotice(){
 export function PublicPrivacy(){return <main className="public-privacy"><Logo/><a className="text-button" href="/">Volver a BucaGest</a><PrivacyNotice/></main>;}
 
 type Action='export'|'player-export'|'erase'|'sessions'|'account'|'bench';
-export default function PrivacyPage({workspace,team,demo,onUpdated,onSignedOut}:{workspace:Workspace;team:Team;demo:boolean;onUpdated:(data:{workspace:Workspace;userId:string;serverNow:number})=>void;onSignedOut:()=>void}){
+export default function PrivacyPage({workspace,team,demo,onUpdated,onSignedOut,onBenchStarted}:{workspace:Workspace;team:Team;demo:boolean;onUpdated:(data:{workspace:Workspace;userId:string;serverNow:number})=>void;onSignedOut:()=>void;onBenchStarted:()=>void}){
   const [action,setAction]=useState<Action|null>(null),[playerId,setPlayerId]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('');
   const player=team.players.find(p=>p.id===playerId);
   const destructive=action==='erase'||action==='account';
@@ -42,7 +42,7 @@ export default function PrivacyPage({workspace,team,demo,onUpdated,onSignedOut}:
     const values=Object.fromEntries(new FormData(e.currentTarget));
     try {
       if(action==='bench'){
-        await api('bench/start',{teamId:team.id,matchId:activeMatch?.id});location.replace('/');return;
+        await api('bench/start',{teamId:team.id,matchId:activeMatch?.id});onBenchStarted();return;
       }else if(action==='export'||action==='player-export'){
         const result=await api('privacy/export',{password:values.password,...(action==='player-export'?{teamId:team.id,playerId}:{})});
         const url=URL.createObjectURL(new Blob([JSON.stringify(result,null,2)],{type:'application/json'}));

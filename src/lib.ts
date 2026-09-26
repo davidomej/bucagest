@@ -21,7 +21,7 @@ export async function api(path: string, body?: unknown) {
   const response=await fetch(`/api/${path}`,{credentials:'same-origin',signal:AbortSignal.timeout(15000),...(body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})});
   const data=await response.json();
   if(!response.ok) throw Object.assign(new Error(data.error||'No se pudo completar la operación.'),{status:response.status});
-  if(body!==undefined&&['login','logout','auth/complete','privacy/revoke-sessions','privacy/delete-account'].includes(path))publishSessionChange();
+  if(body!==undefined&&['login','logout','auth/complete','privacy/revoke-sessions','privacy/delete-account','bench/start'].includes(path))publishSessionChange();
   return data;
 }
 export function resizeImage(file: File, size: number): Promise<Blob> {

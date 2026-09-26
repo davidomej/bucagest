@@ -6,7 +6,8 @@ import {build} from 'esbuild';
 import {JSDOM} from 'jsdom';
 import {act,createElement} from 'react';
 import {createRoot} from 'react-dom/client';
-import {emptyWorkspace} from '../server/domain.js';
+import {applyCommand,emptyWorkspace} from '../server/domain.js';
+import {benchData} from '../server/bench.js';
 
 const compiled=await build({entryPoints:['src/App.tsx'],bundle:true,packages:'external',format:'esm',platform:'node',write:false,jsx:'automatic'});
 const dir=await mkdtemp(new URL('./.session-ui-',import.meta.url));
@@ -19,6 +20,9 @@ const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});retur
 
 async function mount(t,{hash='',handle,broadcast=true}={}){
   const dom=new JSDOM('<div id="root"></div>',{url:`http://localhost/${hash}`,pretendToBeVisual:true});
+  dom.window.scrollTo=()=>{};
+  dom.window.HTMLDialogElement.prototype.showModal=function(){this.open=true;};
+  dom.window.HTMLDialogElement.prototype.close=function(){this.open=false;};
   const saved=new Map();
   function global(name,value){saved.set(name,Object.getOwnPropertyDescriptor(globalThis,name));Object.defineProperty(globalThis,name,{value,configurable:true,writable:true});}
   for(const name of ['window','document','location','history','navigator','FormData','CustomEvent','localStorage'])global(name,dom.window[name]);
@@ -163,4 +167,79 @@ test('un login pendiente no restaura la cuenta si otra pestaña ha cambiado la s
   await act(async()=>{pending.resolve(account);});
   assert.match(document.body.textContent,/Tu equipo te espera/);
   assert.ok(!h.calls.includes('team'));
+});
+
+function matchWorkspace(){
+  let state=emptyWorkspace('Equipo banquillo');
+  const command=(type,payload)=>{state=applyCommand(state,{type,teamId:state.activeTeamId,payload});};
+  command('player.save',{name:'Titular',number:1,position:'POR'});
+  command('player.save',{name:'Suplente',number:2,position:'DEF'});
+  command('fixture.save',{opponent:'Rival',date:'2026-09-26T18:00:00Z',home:true,round:1,season:'2026/27'});
+  const team=state.teams[0],matchId=team.matches[0].id;
+  command('match.lineup',{matchId,playerIds:[team.players[0].id]});
+  command('match.start',{matchId});
+  const user={...account.user,scope:'bench',benchTeamId:team.id,benchMatchId:matchId};
+  return {state,user};
+}
+
+test('activar banquillo abre las sustituciones sin recargar ni pedir login y permite guardar un cambio',async t=>{
+  let {state,user}=matchWorkspace(),current=account;
+  const activation=deferred();let substitution;
+  const h=await mount(t,{handle:async(path,options)=>{
+    if(path==='session')return current;
+    if(path==='team')return {workspace:state,userId:account.user.id,serverNow:Date.now()};
+    if(path==='bench/start'){
+      assert.deepEqual(JSON.parse(options.body),{teamId:user.benchTeamId,matchId:user.benchMatchId});
+      await activation.promise;current={...account,user};return {ok:true};
+    }
+    if(path==='bench')return benchData(state,user);
+    if(path==='bench/substitution'){
+      substitution=JSON.parse(options.body);
+      assert.equal(substitution.workspaceId,state.id);assert.equal(substitution.revision,state.revision);
+      state=applyCommand(state,{type:'match.substitute',teamId:user.benchTeamId,payload:{matchId:user.benchMatchId,...substitution}});
+      return benchData(state,user);
+    }
+    if(path==='logout'){current={...account,user:null};return {ok:true};}
+  }});
+  const click=async label=>{const button=[...document.querySelectorAll('button')].find(b=>b.textContent.trim()===label);assert.ok(button,label);assert.equal(button.disabled,false);await act(async()=>button.click());};
+  await click('Privacidad');
+  await click('Activar modo banquillo');
+  await act(async()=>document.querySelector('dialog form').dispatchEvent(new h.dom.window.Event('submit',{bubbles:true,cancelable:true})));
+  // A focus check can happen while the server is replacing the session cookie.
+  await act(async()=>window.dispatchEvent(new window.Event('focus')));
+  await act(async()=>activation.resolve());
+  assert.match(document.body.textContent,/¿Sales del campo\?/);
+  assert.equal(document.querySelector('input[type=password]'),null);
+  assert.equal(document.querySelector('nav'),null);
+  assert.equal(h.calls.filter(path=>path==='team').length,1);
+  assert.ok(h.channels.some(channel=>channel.messages.some(message=>message.type==='changed')));
+  await click('Sustituir');
+  const incoming=document.querySelector('[aria-label="Entró Suplente, dorsal 2"]');assert.ok(incoming);
+  await act(async()=>incoming.click());
+  assert.equal(substitution.outId,state.teams[0].players[0].id);
+  assert.equal(substitution.inId,state.teams[0].players[1].id);
+  assert.match(document.querySelector('.bench-players').textContent,/Suplente/);
+  assert.doesNotMatch(document.querySelector('.bench-players').textContent,/Titular/);
+  await click('Salir e iniciar sesión como gestor');
+  assert.match(document.body.textContent,/Tu equipo te espera/);
+});
+
+test('recargar una sesión de banquillo abre directamente el partido sin consultar datos de gestión',async t=>{
+  const {state,user}=matchWorkspace();
+  const h=await mount(t,{handle:path=>path==='session'?{...account,user}:path==='bench'?benchData(state,user):undefined});
+  assert.match(document.body.textContent,/¿Sales del campo\?/);
+  assert.match(document.querySelector('.bench-players').textContent,/Titular/);
+  assert.ok(!h.calls.includes('team'));
+});
+
+test('otra pestaña que pasa a banquillo descarta las respuestas de gestión pendientes',async t=>{
+  const {state,user}=matchWorkspace(),pending=deferred();let switched=false;
+  const h=await mount(t,{handle:path=>path==='session'?switched?{...account,user}:account:path==='team'?pending.promise:path==='bench'?benchData(state,user):undefined});
+  switched=true;
+  await act(async()=>h.channels[0].onmessage({data:{type:'changed',source:'other-tab'}}));
+  assert.match(document.body.textContent,/¿Sales del campo\?/);
+  await act(async()=>pending.resolve({workspace:state,userId:account.user.id,serverNow:Date.now()}));
+  assert.equal(document.querySelector('nav'),null);
+  assert.match(document.body.textContent,/¿Sales del campo\?/);
+  assert.equal(h.calls.filter(path=>path==='team').length,1);
 });
