@@ -14,16 +14,24 @@ async function makePool(){
     async connect(){let release;const next=new Promise(resolve=>{release=resolve;});const previous=tail;tail=next;await previous;return {query:(sql,args)=>db.query(sql,args),release};},end:()=>db.close()};
 }
 test('API y persistencia: autenticación, aislamiento, concurrencia y reintentos',async t=>{
-  const pool=await makePool();const store=await createStore({pool});const app=createApp(store,{origin:'http://localhost:3000'});app.use(errorHandler);
+  const pool=await makePool();const store=await createStore({pool});const emails=[];const mailer={configured:true,sendLink:async message=>{emails.push(message);}};
+  const app=createApp(store,{origin:'http://localhost:3000',mailer,providers:{}});app.use(errorHandler);
   const server=app.listen(0,'127.0.0.1');await once(server,'listening');const base=`http://127.0.0.1:${server.address().port}`;const users=[];
   async function req(path,{body,cookie,origin}={}){const r=await fetch(`${base}/api/${path}`,{...(body?{method:'POST',body:JSON.stringify(body)}:{}),headers:{'Content-Type':'application/json',...(cookie?{cookie}:{}),...(origin?{origin}:{})}});return {status:r.status,data:await r.json(),cookie:r.headers.get('set-cookie')?.split(';')[0]};}
   t.after(async()=>{await new Promise(resolve=>server.close(resolve));for(const id of users)await pool.query('DELETE FROM minuto_users WHERE id=$1',[id]);await store.close();});
   let a,b;
   await t.test('salud pública y datos privados',async()=>{assert.equal((await req('health')).status,200);assert.equal((await req('team')).status,401);});
   await t.test('registra dos equipos aislados con sesión opaca',async()=>{
-    a=await req('register',{body:{email:`a-${randomUUID()}@example.test`,password:'Password-test-2026',name:'Entrenador A',teamName:'Equipo A'}});
-    b=await req('register',{body:{email:`b-${randomUUID()}@example.test`,password:'Password-test-2026',name:'Entrenador B',teamName:'Equipo B'}});
-    assert.equal(a.status,201);assert.equal(b.status,201);users.push(a.data.user.id,b.data.user.id);
+    const signup=async(name)=>{
+      const email=`${name.toLowerCase()}-${randomUUID()}@example.test`,password='Password-test-2026';
+      const pending=await req('register',{body:{email,name:`Entrenador ${name}`,teamName:`Equipo ${name}`}});
+      assert.equal(pending.status,202);assert.equal(pending.cookie,undefined);assert.equal(pending.data.user,undefined);
+      const link=emails.find(m=>m.email===email);
+      assert.equal((await req('auth/complete',{body:{token:link.token,kind:'verify',password}})).status,200);
+      return req('login',{body:{email,password}});
+    };
+    a=await signup('A');b=await signup('B');
+    assert.equal(a.status,200);assert.equal(b.status,200);users.push(a.data.user.id,b.data.user.id);
     assert.match(a.cookie,/minuto_session=[a-f0-9]{64}/);assert.notEqual(a.cookie,b.cookie);
     assert.equal((await req('team',{cookie:a.cookie})).data.workspace.teams[0].settings.name,'Equipo A');assert.equal((await req('team',{cookie:b.cookie})).data.workspace.teams[0].settings.name,'Equipo B');
   });

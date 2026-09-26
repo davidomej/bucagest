@@ -9,4 +9,4 @@ export type PaymentRecord = { playerId: string; season: string; checks: Partial<
 export type Team = { id: string; settings: Settings; players: Player[]; matches: Match[]; payments: PaymentRecord[] };
 export type League = { id: string; name: string; season: string; color: string; archived: boolean };
 export type Workspace = { id: string; revision: number; activeTeamId: string; leagues: League[]; teams: Team[] };
-export type Session = { user: {id: string; name: string; email: string}|null; demo: boolean; registrationAllowed: boolean };
+export type Session = { user: {id: string; name: string; email: string;scope?:'bench'}|null; demo: boolean; registrationAllowed: boolean; emailReady: boolean; providers: ('google'|'apple'|'facebook')[] };

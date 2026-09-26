@@ -4,7 +4,7 @@ App web en español para gestionar un equipo de fútbol, su calendario y los min
 
 ## Qué incluye
 
-- Registro e inicio de sesión. Cada cuenta tiene su equipo privado; la misma cuenta puede utilizarse en varios dispositivos.
+- Registro con correo verificado, recuperación de contraseña y acceso con Google, Apple o Facebook cuando están configurados. Cada cuenta conserva su espacio privado y puede utilizarse en varios dispositivos.
 - Nombre del equipo, competición y temporada; fútbol 5, 7, 8 u 11, duración prevista y reentradas configurables.
 - Alta, edición y archivo de jugadores con nombre, dorsal y posición. Archivar conserva el historial.
 - Calendario manual e importación CSV con plantilla descargable y validación previa.
@@ -17,6 +17,8 @@ App web en español para gestionar un equipo de fútbol, su calendario y los min
 - Estadísticas por temporada y exportación CSV, incluyendo segundos exactos.
 
 ## Despliegue en Coolify con PostgreSQL existente
+
+**Antes de desplegar esta versión:** completa [PRIVACY_SETUP.md](PRIVACY_SETUP.md). Producción exige una clave de cifrado y los datos reales del aviso de privacidad. Haz una copia recuperable antes de migrar el almacenamiento. El cifrado y las herramientas de privacidad no equivalen por sí solos a cumplimiento legal.
 
 1. Sube este proyecto a tu repositorio Git y crea una aplicación en Coolify desde ese repositorio.
 2. Selecciona **Dockerfile** como Build Pack. Ruta del Dockerfile: `/Dockerfile`. Puerto expuesto: **3000**.
@@ -34,7 +36,7 @@ App web en español para gestionar un equipo de fútbol, su calendario y los min
 
 4. Si PostgreSQL comparte servidor y red de destino con la app, copia su **Internal URL** en `DATABASE_URL`. Si está en otro servidor Coolify, configura una conexión alcanzable entre servidores; el hostname interno no se resuelve por sí solo fuera de su red. Para servicios definidos como stacks separados puede ser necesario **Connect to Predefined Network**. Mantén PostgreSQL en la red privada siempre que sea posible.
 5. Despliega. La app crea automáticamente sus tablas `minuto_users`, `minuto_teams`, `minuto_sessions` y `minuto_commands` al arrancar. El usuario de PostgreSQL necesita permiso para crearlas en el esquema. El arranque falla si no puede conectar, en lugar de guardar datos temporales.
-6. Abre el dominio y pulsa **Crear una cuenta**. Registra el nombre del equipo, añade jugadores y calendario. Si el despliegue es para un solo club, después puedes poner `ALLOW_REGISTRATION=false` y redesplegar para cerrar nuevos registros.
+6. Configura el correo y los proveedores siguiendo [AUTH_SETUP.md](AUTH_SETUP.md) antes de desplegar esta versión. Abre el dominio, pulsa **Crear una cuenta** y confirma el correo recibido antes de iniciar sesión. Las cuentas anteriores también deben verificar su correo; sus datos se conservan. Si el despliegue es para un solo club, después puedes poner `ALLOW_REGISTRATION=false` y redesplegar para cerrar nuevos registros.
 7. Configura la comprobación de salud en **GET `/api/health`**, puerto 3000. El Dockerfile también incorpora esta comprobación y valida la conexión a la base de datos.
 
 La imagen usa Node 22, compila la interfaz y ejecuta el servidor con un usuario sin privilegios. No necesita volumen de aplicación: los datos se guardan en PostgreSQL. Las tipografías se incluyen en la imagen, sin solicitudes a Google Fonts.
@@ -69,8 +71,9 @@ La demo contiene un equipo ficticio y datos temporales en memoria, compartidos e
 1. Abre un partido del calendario. Selecciona titulares y usa **Guardar alineación** si lo prepararás antes del día del partido.
 2. Con el pitido inicial, pulsa **Iniciar partido**. Si eliges menos jugadores que la modalidad configurada, la app te avisa antes de iniciar.
 3. Cuando salga un jugador, búscalo por nombre o dorsal en **En el campo** y pulsa **Sustituir**. Aparecerá **¿Quién entró por ti?**: toca al compañero disponible y el cambio se guarda directamente, sin otra confirmación ni preguntas sobre posiciones. La salida y la entrada comparten el instante de recepción en el servidor; el entrante hereda automáticamente la posición del saliente. Cancelar no registra ningún cambio. Si comenzaste con menos jugadores, puedes completar el campo desde **Banquillo → Entrar**.
-4. Pulsa **Descanso** al terminar la primera parte y **Iniciar segunda parte** al volver. El descanso no suma minutos. El tiempo continúa desde donde se detuvo; no se redondea a una duración reglamentaria.
-5. Pulsa **Finalizar partido** y confirma. Las estadísticas de temporada incluyen solo los partidos finalizados; el directo tiene su propio cómputo.
+4. Si los jugadores usarán una tablet compartida, después de iniciar el partido entra en **Privacidad → Activar modo banquillo** en esa tablet. Solo permite sustituciones de ese partido, sin cobros ni fichas completas. Continúa los controles del partido desde otro dispositivo con tu sesión de gestión.
+5. Pulsa **Descanso** al terminar la primera parte y **Iniciar segunda parte** al volver. El descanso no suma minutos. El tiempo continúa desde donde se detuvo; no se redondea a una duración reglamentaria.
+6. Pulsa **Finalizar partido** y confirma. Las estadísticas de temporada incluyen solo los partidos finalizados; el directo tiene su propio cómputo.
 
 Se guardan fracciones de segundo y se suman antes de mostrar minutos completos. Un cronómetro de `12:30` representa 12 minutos y 30 segundos. Las reentradas abren intervalos nuevos. La duración configurada es orientativa; no finaliza automáticamente el encuentro.
 
@@ -95,8 +98,9 @@ Usa una base exclusiva para pruebas. Las pruebas crean tablas y cuentas ficticia
 ## Operación y alcance
 
 - Haz copias de seguridad de PostgreSQL desde Coolify. El repositorio y la imagen no contienen los datos del equipo.
-- Una cuenta por equipo, sin roles separados ni recuperación de contraseña por correo en esta versión. Guarda las credenciales en un gestor de contraseñas.
+- Cada cuenta puede gestionar varios equipos. El modo banquillo limita una tablet a sustituciones del partido activo; no hay roles individuales por jugador ni varios gestores independientes por club. La verificación y recuperación dependen del correo configurado. Los proveedores requieren sus propias credenciales y las aprobaciones externas correspondientes.
 - No hay conexión con proveedores de calendarios: la carga es manual o por CSV.
 - Las pausas y el final se marcan manualmente. No se pueden corregir partidos finalizados desde la interfaz.
-- Modelo de datos: una fila JSONB por equipo (plantilla, configuración, partidos e intervalos), con bloqueo transaccional y revisión. Usuarios y sesiones tienen tablas separadas. Adecuado para equipos y ligas de tamaño habitual; conserva el historial de la plantilla dentro del equipo.
+- Modelo de datos: un espacio por cuenta con sus equipos, cifrado en un contenedor JSONB con AES-256-GCM en producción; imágenes cifradas por separado. Bloqueo transaccional y revisión. Identidad de cuenta y sesiones tienen tablas separadas; no están cubiertas por el cifrado de espacios. Adecuado para equipos y ligas de tamaño habitual.
+- Menú **Privacidad**: exportación completa o individual, eliminación confirmada y revocación de sesiones. Aviso público en `/privacy`. Versión para adultos. Sigue [PRIVACY_SETUP.md](PRIVACY_SETUP.md) para responsabilidades, copias, derechos y configuración; contrato de encargo pendiente de formalizar con cada responsable.
 - No se ha configurado ningún dominio ni conexión a tu instancia de Coolify: añade las variables reales al desplegar.

@@ -6,7 +6,7 @@ export function demoWorkspace() {
   command('league.save', { name: 'Liga Municipal · Fútbol 7', season: '2026/27', color: '#8ac9eb' });
   const leagueId = workspace.leagues[0].id;
   command('settings', { ...workspace.teams[0].settings, leagueIds: [leagueId] });
-  const names = [['Alejandro Martín',1,'POR','2009-03-12'],['Pablo Rodríguez',4,'DEF','2008-11-02'],['Hugo García',5,'DEF','2009-01-20'],['Daniel Pérez',6,'MED','2008-06-15'],['David Santana',8,'MED','2009-09-08'],['Álvaro Hernández',9,'DEL','2008-04-27'],['Lucas Díaz',10,'DEL','2009-07-19'],['Sergio Torres',13,'POR','2008-12-30'],['Marcos Suárez',3,'DEF','2009-02-14'],['Adrián López',7,'MED','2008-08-05'],['Diego Castro',11,'DEL','2009-05-23'],['Javier Ramos',14,'DEF','2008-10-11'],['Mario León',17,'MED','2009-04-03'],['Nicolás Vega',21,'DEL','2008-09-17']];
+  const names = [['Alejandro Martín',1,'POR','1999-03-12'],['Pablo Rodríguez',4,'DEF','1998-11-02'],['Hugo García',5,'DEF','1999-01-20'],['Daniel Pérez',6,'MED','1998-06-15'],['David Santana',8,'MED','1999-09-08'],['Álvaro Hernández',9,'DEL','1998-04-27'],['Lucas Díaz',10,'DEL','1999-07-19'],['Sergio Torres',13,'POR','1998-12-30'],['Marcos Suárez',3,'DEF','1999-02-14'],['Adrián López',7,'MED','1998-08-05'],['Diego Castro',11,'DEL','1999-05-23'],['Javier Ramos',14,'DEF','1998-10-11'],['Mario León',17,'MED','1999-04-03'],['Nicolás Vega',21,'DEL','1998-09-17']];
   for (const [name, number, position, birthdate] of names) command('player.save', { name, number, position, birthdate });
   const now = new Date(); now.setHours(18,0,0,0);
   for (const [index, opponent] of ['CD Atlántico','Unión Deportiva Norte','Racing del Sur','Sporting Costa','Atlético Central'].entries()) {

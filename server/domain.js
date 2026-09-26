@@ -113,11 +113,27 @@ export function applyCommand(original, command, now = Date.now()) {
       record.checks[field] = value;
     } else if (type === 'player.save') {
       const value = playerSchema.parse(payload);
+      if(value.birthdate) {
+        const today=new Date(now), adultDate=new Date(Date.UTC(today.getUTCFullYear()-18,today.getUTCMonth(),today.getUTCDate())).toISOString().slice(0,10);
+        requireThat(value.birthdate<=adultDate, 'Esta versión solo admite jugadores adultos. No introduzcas datos de menores.');
+      }
       requireThat(!team.players.some(p => p.id !== payload.id && !p.archived && p.number === value.number), 'Ese dorsal ya pertenece a otro jugador.');
       if (payload.id) {
         const player = team.players.find(p => p.id === payload.id && !p.archived);
         requireThat(player, 'No se encuentra el jugador.'); Object.assign(player, value);
       } else team.players.push({ id: randomUUID(), ...value, archived: false });
+    } else if (type === 'player.erase') {
+      const {id}=z.object({id:z.uuid()}).parse(payload);
+      requireThat(team.players.some(p=>p.id===id), 'No se encuentra el jugador.');
+      requireThat(!team.matches.some(m=>['live','paused'].includes(m.status)), 'Finaliza el partido antes de eliminar datos de jugadores.');
+      team.players=team.players.filter(p=>p.id!==id);
+      team.payments=team.payments.filter(p=>p.playerId!==id);
+      for(const match of team.matches) {
+        match.lineup=match.lineup.filter(pid=>pid!==id);
+        match.stints=match.stints.filter(s=>s.playerId!==id);
+        delete match.positions[id];
+        match.events=match.events.filter(event=>!['inId','outId','scorerId','assistId'].some(field=>event[field]===id));
+      }
     } else if (type === 'player.archive') {
       const player = team.players.find(p => p.id === payload.id);
       requireThat(player, 'No se encuentra el jugador.');
