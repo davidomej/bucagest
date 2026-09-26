@@ -1,4 +1,5 @@
 import type { Match, Player, Team } from './types';
+import { publishSessionChange } from './sessionEvents';
 export const positions = { POR:'Portero', DEF:'Defensa', MED:'Centrocampista', DEL:'Delantero' };
 export const clock = (seconds: number) => `${String(Math.floor(seconds/60)).padStart(2,'0')}:${String(Math.floor(seconds%60)).padStart(2,'0')}`;
 export const elapsed = (m: Match, now: number) => m.elapsedSeconds+(m.runningSince===null?0:Math.max(0,now-m.runningSince)/1000);
@@ -20,6 +21,7 @@ export async function api(path: string, body?: unknown) {
   const response=await fetch(`/api/${path}`,{credentials:'same-origin',signal:AbortSignal.timeout(15000),...(body===undefined?{}:{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})});
   const data=await response.json();
   if(!response.ok) throw Object.assign(new Error(data.error||'No se pudo completar la operación.'),{status:response.status});
+  if(body!==undefined&&['login','logout','auth/complete','privacy/revoke-sessions','privacy/delete-account'].includes(path))publishSessionChange();
   return data;
 }
 export function resizeImage(file: File, size: number): Promise<Blob> {

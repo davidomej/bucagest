@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {once} from 'node:events';
-import {randomBytes} from 'node:crypto';
+import {randomBytes,randomUUID} from 'node:crypto';
 import {PGlite} from '@electric-sql/pglite';
 import {generateKeyPair,SignJWT} from 'jose';
 import {createStore} from '../server/store.js';
@@ -44,6 +44,31 @@ test('registro: no entrega sesión ni datos; solo se entra después de confirmar
   const login=await h.req('login',{body:{email:h.email,password:h.password}});assert.equal(login.status,200);assert.ok(login.cookie);
   assert.equal((await h.req('team',{cookie:login.cookie})).status,200);
 });
+test('verificar otra cuenta con una sesión abierta la revoca y mantiene los equipos separados',async t=>{
+  const h=await harness(t);await h.signup();
+  await h.req('auth/complete',{body:{token:h.emails[0].token,kind:'verify',password:h.password}});
+  const first=await h.req('login',{body:{email:h.email,password:h.password}});
+  let original=(await h.req('team',{cookie:first.cookie})).data.workspace;
+  original=await h.store.command(first.data.user.id,{type:'player.save',workspaceId:original.id,teamId:original.activeTeamId,revision:original.revision,operationId:randomUUID(),payload:{name:'Jugador privado A',number:7,position:'MED'}});
+  const asset=await h.store.putAsset(first.data.user.id,'image/png',Buffer.from('imagen privada de prueba'));
+  const secondEmail='second@example.test';
+  await h.req('register',{body:{email:secondEmail,name:'Segundo gestor',teamName:'Equipo nuevo'}});
+  const completed=await h.req('auth/complete',{cookie:first.cookie,body:{token:h.emails.at(-1).token,kind:'verify',password:h.password}});
+  assert.equal(completed.status,200);assert.equal(completed.cookie,'minuto_session=');
+  assert.equal((await h.req('session',{cookie:first.cookie})).data.user,null);
+  assert.equal((await h.req('team',{cookie:first.cookie})).status,401);
+  const second=await h.req('login',{body:{email:secondEmail,password:h.password}});
+  assert.equal(second.status,200);assert.notEqual(second.data.user.id,first.data.user.id);
+  const fresh=(await h.req('team',{cookie:second.cookie})).data.workspace;
+  assert.notEqual(fresh.id,original.id);assert.equal(fresh.teams[0].settings.name,'Equipo nuevo');
+  assert.deepEqual(fresh.teams[0].players,[]);assert.equal(fresh.teams[0].settings.crestId,null);
+  assert.equal((await h.req(`assets/${asset}`,{cookie:second.cookie})).status,404);
+  const wrongTeam=await h.req('command',{cookie:second.cookie,body:{type:'player.save',workspaceId:original.id,teamId:original.activeTeamId,revision:original.revision,operationId:randomUUID(),payload:{name:'No permitido',number:9,position:'DEF'}}});
+  assert.equal(wrongTeam.status,409);
+  const firstAgain=await h.req('login',{body:{email:h.email,password:h.password}});
+  assert.deepEqual((await h.req('team',{cookie:firstAgain.cookie})).data.workspace,original);
+});
+
 test('enlaces: caducidad, reenvío sin enumeración y limitación por correo',async t=>{
   const h=await harness(t);await h.signup();
   const resend=await h.req('auth/resend-verification',{body:{email:h.email}});
