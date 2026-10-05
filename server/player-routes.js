@@ -26,6 +26,7 @@ export function installPlayerInvitations(app,store,{mailer,origin,production,lim
 
 export function installPlayerManagement(app,store,{sendInvitation,limiter,production}) {
   const target=z.object({teamId:z.uuid(),playerId:z.uuid()});
+  app.use('/api/player-access',(req,res,next)=>{if(req.user.role!=='manager')throw new AppError('Solo el gestor puede cambiar los accesos del equipo.',403);next();});
   app.get('/api/player-access/:teamId',async(req,res)=>{
     if(store.demo)return res.json({access:[]});
     res.json({access:await store.playerAccess(req.user.id,z.uuid().parse(req.params.teamId))});

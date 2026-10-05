@@ -37,8 +37,8 @@ export function createApp(store, { production = false, origin = process.env.APP_
     next();
   });
   app.get('/api/player-portal',async(req,res)=>{if(store.demo)return res.json({teams:[],serverNow:Date.now()});res.json(await store.playerPortal(req.user.id));});
-  app.use('/api',(req,res,next)=>{if(req.user.role==='player')throw new AppError('Tu cuenta de jugador tiene acceso de lectura a tu área personal.',403);next();});
   installPlayerManagement(app,store,{sendInvitation,limiter,production});
+  app.use('/api',(req,res,next)=>{if(req.user.role==='player')throw new AppError('Tu cuenta de jugador tiene acceso de lectura a tu área personal.',403);next();});
   installBench(app,store,{production});
   const privacyLimiter=rateLimit({windowMs:15*60000,limit:10,standardHeaders:'draft-8',legacyHeaders:false,message:{error:'Demasiados intentos. Vuelve a intentarlo en unos minutos.'}});
   installPrivacy(app,store,{production,limiter:privacyLimiter});
