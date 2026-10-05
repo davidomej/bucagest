@@ -27,6 +27,17 @@ test('cambio simultáneo usa un instante exacto y conserva los segundos',()=>{
   f.command('match.finish',{},1200000);assert.equal(playerSeconds(f.match,f.ids[1]),600.5);assert.equal(playerSeconds(f.match,f.ids[7]),599.5);
   assert.equal(f.ids.reduce((n,id)=>n+playerSeconds(f.match,id),0),7*1200);
 });
+test('un jugador creado con el partido en marcha solo suma minutos desde su entrada',()=>{
+  const f=fixture();f.command('match.start');
+  const state=f.command('player.save',{name:'Incorporación tardía',number:10,position:'DEL'},600000);
+  const newPlayerId=state.teams[0].players.find(p=>p.name==='Incorporación tardía').id;
+  assert.equal(f.match.stints.some(s=>s.playerId===newPlayerId),false);
+  f.command('match.substitute',{outId:f.ids[1],inId:newPlayerId},600000);
+  assert.equal(f.match.stints.find(s=>s.playerId===newPlayerId).inSeconds,600);
+  f.command('match.finish',{},1200000);
+  assert.equal(playerSeconds(f.match,newPlayerId),600);
+  assert.equal(playerSeconds(f.match,f.ids[1]),600);
+});
 test('una reentrada suma intervalos sin sobrescribir el primer tramo',()=>{
   const f=fixture();f.command('match.start');f.command('match.substitute',{outId:f.ids[1],inId:f.ids[7]},600000);f.command('match.substitute',{outId:f.ids[7],inId:f.ids[1]},900000);f.command('match.finish',{},1200000);
   assert.equal(playerSeconds(f.match,f.ids[1]),900);assert.equal(playerSeconds(f.match,f.ids[7]),300);

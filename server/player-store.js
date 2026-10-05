@@ -147,7 +147,13 @@ export function playerStore(pool,cipher,hashPassword,verifyPassword) {
           const workspace=await workspaceFor(db,access.owner_id);
           const team=workspace.teams.find(t=>t.id===access.team_id),player=team?.players.find(p=>p.id===access.player_id&&!p.archived&&matchesEmail(cipher,access.owner_id,access.team_id,access.player_id,p.email,access.email_cipher));
           if(!player)continue;
-          const matches=team.matches.map(m=>({id:m.id,opponent:m.opponent,date:m.date,venue:m.venue,home:m.home,round:m.round,season:m.season,leagueId:m.leagueId,status:m.status,homeScore:m.homeScore,awayScore:m.awayScore,seconds:playerSeconds(m,player.id),played:m.stints.some(s=>s.playerId===player.id)}));
+          const playerNames=new Map(team.players.map(p=>[p.id,p.name]));
+          const matches=team.matches.map(m=>{
+            const played=m.stints.some(s=>s.playerId===player.id),conceded=m.home?m.awayScore:m.homeScore;
+            return {id:m.id,opponent:m.opponent,date:m.date,venue:m.venue,home:m.home,round:m.round,season:m.season,leagueId:m.leagueId,status:m.status,homeScore:m.homeScore,awayScore:m.awayScore,seconds:playerSeconds(m,player.id),played,
+              cleanSheet:played&&m.status==='finished'&&['DEF','POR'].includes(player.position)&&conceded===0,
+              goals:m.events.filter(e=>e.kind==='goal').map(e=>({seconds:e.seconds,scorerId:e.scorerId,assistId:e.assistId??null,scorer:playerNames.get(e.scorerId)??null,assist:e.assistId?playerNames.get(e.assistId)??null:null}))};
+          });
           const competitions=[];
           for(const league of workspace.leagues.filter(l=>team.settings.leagueIds.includes(l.id)&&!l.archived)) {
             const key=[access.owner_id,league.id,league.season];
@@ -156,7 +162,7 @@ export function playerStore(pool,cipher,hashPassword,verifyPassword) {
             const standings=official?(await db.query('SELECT group_name,position,team_name,played,won,drawn,lost,goals_for,goals_against,points FROM minuto_official_standings WHERE owner_id=$1 AND league_id=$2 AND season=$3 ORDER BY group_name,position',key)).rows:[];
             competitions.push({id:league.id,name:league.name,season:league.season,kind:official?.kind??league.kind??'league',updatedAt:official?.updated_at??null,sourceUrl:official?.source_url??null,results,standings});
           }
-          teams.push({id:team.id,name:team.settings.name,season:team.settings.season,player:{name:player.name,number:player.number,position:player.position},matches,competitions});
+          teams.push({id:team.id,name:team.settings.name,season:team.settings.season,player:{id:player.id,name:player.name,number:player.number,position:player.position},matches,competitions});
         }
         return {teams,serverNow:Date.now()};
       });

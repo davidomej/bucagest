@@ -28,7 +28,7 @@ async function harness(t) {
 test('invitación: correo obligatorio, token de un uso, rol de lectura y datos propios',async t=>{
   const h=await harness(t);
   assert.equal((await h.save(undefined,{email:undefined})).status,400);
-  const saved=await h.save();assert.equal(saved.status,200);assert.match(saved.data.invitationMessage,/enviada/);
+  const saved=await h.save('player@example.test',{position:'DEF'});assert.equal(saved.status,200);assert.match(saved.data.invitationMessage,/enviada/);
   const w=saved.data.workspace,team=w.teams[0],player=team.players[0],invite=h.emails[0];
   assert.equal(invite.kind,'invite');assert.equal(invite.teamName,team.settings.name);
   const stored=(await h.pool.query('SELECT token_hash,email_cipher,expires_at FROM minuto_player_access')).rows[0];
@@ -40,8 +40,11 @@ test('invitación: correo obligatorio, token de un uso, rol de lectura y datos p
   await h.command('player.save',{name:'Compañero privado',number:8,position:'DEF',email:'private@example.test',birthdate:'1990-01-01'});
   await h.command('fixture.save',{opponent:'Rival',date:'2026-10-01T18:00:00Z',venue:'Campo',home:true,round:1,season:team.settings.season});
   let state=await h.store.workspace(h.owner.id),match=state.teams[0].matches[0];
-  await h.command('match.lineup',{matchId:match.id,playerIds:[player.id]});
+  const teammate=team.players.find(p=>p.id!==player.id);
+  await h.command('match.lineup',{matchId:match.id,playerIds:[player.id,teammate.id]});
   await h.command('match.start',{matchId:match.id});
+  await h.command('match.goal',{matchId:match.id,scorerId:player.id,assistId:teammate.id});
+  await h.command('match.goal',{matchId:match.id,scorerId:teammate.id,assistId:player.id});
   await h.command('match.finish',{matchId:match.id});
   const login=await h.accept();assert.equal(login.data.user.role,'player');
   assert.equal((await h.req('session',undefined,login.cookie)).data.user.role,'player');
@@ -50,6 +53,10 @@ test('invitación: correo obligatorio, token de un uso, rol de lectura y datos p
   const portal=await h.req('player-portal',undefined,login.cookie);assert.equal(portal.status,200);
   assert.equal(portal.data.teams[0].matches[0].played,true);
   assert.equal(portal.data.teams[0].player.name,'Jugador');
+  assert.equal(portal.data.teams[0].player.id,player.id);
+  assert.equal(portal.data.teams[0].matches[0].goals.filter(g=>g.scorerId===player.id).length,1);
+  assert.equal(portal.data.teams[0].matches[0].goals.filter(g=>g.assistId===player.id).length,1);
+  assert.equal(portal.data.teams[0].matches[0].cleanSheet,true);
   assert.ok(!JSON.stringify(portal.data).includes('private@example.test'));
   assert.ok(!JSON.stringify(portal.data).includes('Compañero privado'));
   assert.equal(portal.data.teams[0].players,undefined);assert.equal(portal.data.teams[0].payments,undefined);
