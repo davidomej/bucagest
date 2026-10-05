@@ -85,6 +85,23 @@ test('un mismo jugador consulta varios equipos vinculados y ve los datos correct
   assert.ok(!JSON.stringify(portal).includes(h.otherCookie));
 });
 
+test('el jugador exporta solo su vista personal y puede borrar su acceso con su contraseña',async t=>{
+  const h=await harness(t);await h.save('player@example.test');await h.command('player.save',{name:'Otra persona',number:8,position:'DEF',email:'private@example.test'});
+  const login=await h.accept();
+  assert.equal((await h.req('player-data/export',{password:'Wrong-password-2026'},login.cookie)).status,401);
+  const exported=await h.req('player-data/export',{password},login.cookie);
+  assert.equal(exported.status,200);assert.equal(exported.data.teams.length,1);assert.equal(exported.data.teams[0].player.name,'Jugador');
+  assert.ok(!JSON.stringify(exported.data).includes('Otra persona'));assert.ok(!JSON.stringify(exported.data).includes('private@example.test'));
+  assert.equal((await h.req('player-data/delete-account',{password,confirmation:'BORRAR'},login.cookie)).status,400);
+  assert.equal((await h.req('player-data/delete-account',{password:'Wrong-password-2026',confirmation:'ELIMINAR MI CUENTA'},login.cookie)).status,401);
+  const deleted=await h.req('player-data/delete-account',{password,confirmation:'ELIMINAR MI CUENTA'},login.cookie);
+  assert.equal(deleted.status,200);assert.equal(deleted.cookie,'minuto_session=');
+  assert.equal((await h.req('player-portal',undefined,login.cookie)).status,401);
+  assert.equal((await h.pool.query('SELECT * FROM minuto_users WHERE email=$1',[login.data.user.email])).rows.length,0);
+  assert.equal((await h.store.workspace(h.owner.id)).teams[0].players[0].email,'player@example.test');
+  assert.equal((await h.pool.query('SELECT * FROM minuto_player_access')).rows.length,0);
+});
+
 test('revocar, cambiar el correo y archivar cortan accesos e invitaciones',async t=>{
   const h=await harness(t);const saved=await h.save(),team=saved.data.workspace.teams[0],player=team.players[0],target={teamId:team.id,playerId:player.id};
   const first=h.emails[0].token;
