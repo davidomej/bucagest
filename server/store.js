@@ -6,6 +6,7 @@ import { demoWorkspace } from './seed.js';
 import { authSchema, authStore } from './auth-store.js';
 import { dataCipher, migrateEncryption } from './encryption.js';
 import { privacyStore } from './privacy-store.js';
+import {playerAccessSchema, playerStore, syncPlayerAccess} from './player-store.js';
 const scrypt = promisify(scryptCb);
 const tokenHash = value => createHash('sha256').update(value).digest('hex');
 export async function hashPassword(password) {
@@ -57,7 +58,8 @@ UPDATE minuto_teams SET data = jsonb_build_object(
       ))
   )
 ) WHERE data ? 'settings';
-${authSchema}`;
+${authSchema}
+${playerAccessSchema}`;
 
 export async function createStore({ demo = false, pool: providedPool, encryptionKey = process.env.DATA_ENCRYPTION_KEY } = {}) {
   if (demo) {
@@ -86,15 +88,16 @@ export async function createStore({ demo = false, pool: providedPool, encryption
   return { demo:false,
     ...authStore(pool,hashPassword,cipher.encode),
     ...privacyStore(pool,cipher),
+    ...playerStore(pool,cipher,hashPassword,verifyPassword),
     health:async()=>{await pool.query('SELECT 1'); return true;}, close:()=>pool.end(),
     async login({email,password}) {
-      const {rows} = await pool.query('SELECT id,email,name,password_hash,email_verified_at FROM minuto_users WHERE email=$1',[email]);
+      const {rows} = await pool.query('SELECT id,email,name,role,password_hash,email_verified_at FROM minuto_users WHERE email=$1',[email]);
       // Perform a password derivation even for unknown accounts to reduce timing differences.
       const stored = rows[0]?.password_hash ?? '00000000000000000000000000000000:'+ '00'.repeat(64);
       const valid = await verifyPassword(password,stored);
       if(!rows[0] || !valid) throw new AppError('Correo o contraseña incorrectos.',401);
       if(!rows[0].email_verified_at) throw new AppError('Confirma tu correo antes de entrar. Utiliza «Reenviar confirmación».',403);
-      return {id:rows[0].id,email:rows[0].email,name:rows[0].name};
+      return {id:rows[0].id,email:rows[0].email,name:rows[0].name,role:rows[0].role};
     },
     async createSession(userId,bench=null) {
       const token = randomBytes(32).toString('hex');
@@ -112,10 +115,10 @@ export async function createStore({ demo = false, pool: providedPool, encryption
     },
     async session(token) {
       if(!token) return null;
-      const {rows} = await pool.query('SELECT u.id,u.email,u.name,s.bench_team_id,s.bench_match_id FROM minuto_sessions s JOIN minuto_users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>NOW() AND u.email_verified_at IS NOT NULL',[tokenHash(token)]);
+      const {rows} = await pool.query('SELECT u.id,u.email,u.name,u.role,s.bench_team_id,s.bench_match_id FROM minuto_sessions s JOIN minuto_users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>NOW() AND u.email_verified_at IS NOT NULL',[tokenHash(token)]);
       const user=rows[0];
       if(!user)return null;
-      return user.bench_team_id?{id:user.id,name:'Banquillo',email:'',scope:'bench',benchTeamId:user.bench_team_id,benchMatchId:user.bench_match_id}:{id:user.id,email:user.email,name:user.name};
+      return user.bench_team_id?{id:user.id,name:'Banquillo',email:'',scope:'bench',benchTeamId:user.bench_team_id,benchMatchId:user.bench_match_id}:{id:user.id,email:user.email,name:user.name,role:user.role};
     },
     async logout(token) { if(token) await pool.query('DELETE FROM minuto_sessions WHERE token_hash=$1',[tokenHash(token)]); },
     async workspace(userId) { const {rows} = await pool.query('SELECT data FROM minuto_teams WHERE user_id=$1',[userId]); if(!rows[0]) throw new AppError('No se encuentra el equipo.',404); return normalizeWorkspace(cipher.decode(rows[0].data,userId)); },
@@ -131,6 +134,7 @@ export async function createStore({ demo = false, pool: providedPool, encryption
         if(seen.rows.length) { await db.query('COMMIT'); return workspace; }
         if(body.revision!==workspace.revision) throw new AppError('Otro dispositivo ha actualizado el equipo. Revisa los datos e inténtalo de nuevo.',409);
         const state = applyCommand(workspace,body);
+        if(['player.save','player.archive','player.erase','team.delete','league.delete'].includes(body.type))await syncPlayerAccess(db,userId,state,cipher);
         await db.query('UPDATE minuto_teams SET data=$2 WHERE user_id=$1',[userId,JSON.stringify(cipher.encode(state,userId))]);
         // Remove images that lost their last reference; keep newly uploaded, not-yet-saved images.
         const refs = w => new Set(w.teams.flatMap(t=>[t.settings.crestId,...t.players.map(p=>p.photoId)]).filter(Boolean));

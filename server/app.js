@@ -7,8 +7,10 @@ import { AppError } from './domain.js';
 import { installAuth } from './auth-routes.js';
 import { installPrivacy, privacyNotice } from './privacy.js';
 import { installBench } from './bench.js';
+import {createMailer} from './mailer.js';
+import {installPlayerInvitations,installPlayerManagement} from './player-routes.js';
 
-export function createApp(store, { production = false, origin = process.env.APP_ORIGIN, registrationAllowed = process.env.ALLOW_REGISTRATION !== 'false', mailer, providers } = {}) {
+export function createApp(store, { production = false, origin = process.env.APP_ORIGIN, registrationAllowed = process.env.ALLOW_REGISTRATION !== 'false', mailer=createMailer(), providers } = {}) {
   const app = express(); app.disable('x-powered-by'); app.set('trust proxy',1);
   app.use(helmet({contentSecurityPolicy:production ? {directives:{'script-src':["'self'"],'style-src':["'self'","'unsafe-inline'"],'img-src':["'self'",'data:'],'connect-src':["'self'"],'font-src':["'self'"],'upgrade-insecure-requests':null}} : false}));
   const jsonParser = express.json({limit:'128kb'});
@@ -28,11 +30,15 @@ export function createApp(store, { production = false, origin = process.env.APP_
   });
   app.get('/api/privacy-notice',(req,res)=>res.json(privacyNotice()));
   installAuth(app,store,{production,origin,registrationAllowed,limiter,mailer,providers});
+  const sendInvitation=installPlayerInvitations(app,store,{mailer,origin,production,limiter});
   app.use('/api',async(req,res,next)=>{const user=await store.session(req.cookies.minuto_session); if(!user) throw new AppError('Inicia sesión para acceder a tu equipo.',401); req.user=user; next();});
   app.use('/api',(req,res,next)=>{
     if(req.user.scope==='bench'&&!((req.method==='GET'&&req.path==='/bench')||(req.method==='POST'&&req.path==='/bench/substitution'))) throw new AppError('La tablet está limitada a las sustituciones de este partido. Inicia sesión como gestor para acceder.',403);
     next();
   });
+  app.get('/api/player-portal',async(req,res)=>{if(store.demo)return res.json({teams:[],serverNow:Date.now()});res.json(await store.playerPortal(req.user.id));});
+  app.use('/api',(req,res,next)=>{if(req.user.role==='player')throw new AppError('Tu cuenta de jugador tiene acceso de lectura a tu área personal.',403);next();});
+  installPlayerManagement(app,store,{sendInvitation,limiter,production});
   installBench(app,store,{production});
   const privacyLimiter=rateLimit({windowMs:15*60000,limit:10,standardHeaders:'draft-8',legacyHeaders:false,message:{error:'Demasiados intentos. Vuelve a intentarlo en unos minutos.'}});
   installPrivacy(app,store,{production,limiter:privacyLimiter});
@@ -40,7 +46,21 @@ export function createApp(store, { production = false, origin = process.env.APP_
   app.post('/api/command',async(req,res)=>{
     const body=z.object({type:z.string().max(60),workspaceId:z.uuid(),teamId:z.uuid().optional(),revision:z.number().int().nonnegative(),operationId:z.uuid(),payload:z.record(z.string(),z.unknown()).default({})}).parse(req.body);
     if(body.type==='player.erase') throw new AppError('Elimina los datos desde Privacidad, confirmando tu contraseña.',403);
-    res.json({workspace:await store.command(req.user.id,body),userId:req.user.id,serverNow:Date.now()});
+    if(body.type==='player.save'&&!store.demo&&!body.payload.id)z.email().parse(body.payload.email);
+    const previousEmail=body.type==='player.save'&&body.payload.id&&!store.demo?(await store.workspace(req.user.id)).teams.find(t=>t.id===body.teamId)?.players.find(p=>p.id===body.payload.id)?.email:undefined;
+    const workspace=await store.command(req.user.id,body);
+    let invitationMessage,invitationWarning;
+    if(body.type==='player.save'&&!store.demo&&(!body.payload.id||previousEmail!==body.payload.email?.trim().toLowerCase())) {
+      const player=workspace.teams.find(t=>t.id===body.teamId)?.players.find(p=>body.payload.id?p.id===body.payload.id:p.email===body.payload.email?.trim().toLowerCase());
+      if(player?.email) {
+        const access=await store.playerAccess(req.user.id,body.teamId);
+        if(!access.some(a=>a.playerId===player.id&&['active','pending'].includes(a.status))) {
+          try {invitationMessage=(await sendInvitation(req.user.id,body.teamId,player.id)).message;}
+          catch(error){invitationWarning='Jugador guardado. '+(error instanceof AppError?error.message:'No se pudo enviar la invitación. Reenvíala desde la plantilla.');}
+        }
+      }
+    }
+    res.json({workspace,userId:req.user.id,serverNow:Date.now(),invitationMessage,invitationWarning});
   });
   app.post('/api/assets',express.raw({type:Object.keys(assetTypes),limit:'400kb'}),async(req,res)=>{
     const ext = assetTypes[req.get('content-type')?.split(';')[0]];

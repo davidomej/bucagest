@@ -26,7 +26,7 @@ export function installAuth(app,store,{production,origin,registrationAllowed,lim
   async function login(res,user){
     const token=await store.createSession(user.id);
     res.cookie('minuto_session',token,cookies);
-    return sessionData({id:user.id,email:user.email,name:user.name});
+    return sessionData(await store.session(token));
   }
   app.get('/api/session',async(req,res)=>res.json(sessionData(await store.session(req.cookies.minuto_session))));
   app.post('/api/register',limiter,async(req,res)=>{

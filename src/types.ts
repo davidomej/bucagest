@@ -1,4 +1,4 @@
-export type Player = { id: string; name: string; number: number; position: 'POR'|'DEF'|'MED'|'DEL'; archived: boolean; birthdate: string|null; photoId: string|null };
+export type Player = { email?:string|null; id: string; name: string; number: number; position: 'POR'|'DEF'|'MED'|'DEL'; archived: boolean; birthdate: string|null; photoId: string|null };
 export type MatchEvent = { id: string; kind: string; seconds: number; outId?: string; inId?: string; forUs?: boolean; scorerId?: string; assistId?: string|null };
 export type FormationKey = '1-2-3-1'|'1-3-2-1'|'1-3-1-2'|'1-2-2-2';
 export type Match = { id: string; opponent: string; date: string; venue: string; home: boolean; round: number; season: string; leagueId: string|null; status: 'scheduled'|'live'|'paused'|'finished'|'postponed'; elapsedSeconds: number; runningSince: number|null; period: number; pauseReason?: string; homeScore: number; awayScore: number; lineup: string[]; formation: FormationKey|null; positions: Record<string,string>; stints: {playerId: string; inSeconds: number; outSeconds: number|null}[]; events: MatchEvent[] };
@@ -7,6 +7,6 @@ export type Settings = { name: string; leagueIds: string[]; season: string; play
 export type PaymentField = 'registration'|'insurance'|'uniformPaid'|'uniformDelivered'|`month${1|2|3|4|5|6|7|8|9|10|11|12}`;
 export type PaymentRecord = { playerId: string; season: string; checks: Partial<Record<PaymentField,boolean>> };
 export type Team = { id: string; settings: Settings; players: Player[]; matches: Match[]; payments: PaymentRecord[] };
-export type League = { id: string; name: string; season: string; color: string; archived: boolean };
+export type League = { kind?:'league'|'cup'; id: string; name: string; season: string; color: string; archived: boolean };
 export type Workspace = { id: string; revision: number; activeTeamId: string; leagues: League[]; teams: Team[] };
-export type Session = { user: {id: string; name: string; email: string;scope?:'bench'}|null; demo: boolean; registrationAllowed: boolean; emailReady: boolean; providers: ('google'|'apple'|'facebook')[] };
+export type Session = { user: {id: string; name: string; email: string;scope?:'bench';role?:'manager'|'player'}|null; demo: boolean; registrationAllowed: boolean; emailReady: boolean; providers: ('google'|'apple'|'facebook')[] };

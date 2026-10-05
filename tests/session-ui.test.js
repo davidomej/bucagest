@@ -243,3 +243,39 @@ test('otra pestaña que pasa a banquillo descarta las respuestas de gestión pen
   assert.match(document.body.textContent,/¿Sales del campo\?/);
   assert.equal(h.calls.filter(path=>path==='team').length,1);
 });
+
+const playerSession={...account,user:{id:'player-user',name:'Jugador A',email:'player@example.test',role:'player'}};
+const playerData={serverNow:Date.now(),teams:[{id:'personal-team',name:'Equipo del jugador',season:'2026/27',player:{name:'Jugador A',number:7,position:'MED'},matches:[{id:'match-a',opponent:'Rival',date:'2026-10-01T18:00:00Z',venue:'Campo',home:true,round:1,season:'2026/27',leagueId:null,status:'finished',homeScore:2,awayScore:1,seconds:1500,played:true}],competitions:[{id:'cup-a',name:'Copa Municipal',season:'2026/27',kind:'cup',updatedAt:null,sourceUrl:null,results:[],standings:[]}]}]};
+
+test('un jugador entra en su área, consulta minutos y copa sin cargar la gestión',async t=>{
+  const h=await mount(t,{handle:path=>path==='session'?playerSession:path==='player-portal'?playerData:undefined});
+  assert.ok(!h.calls.includes('team'));assert.match(document.body.textContent,/Jugador A/);assert.match(document.body.textContent,/25:00/);
+  assert.doesNotMatch(document.body.textContent,/Cobros|Configuración|Añadir jugador/);
+  const official=[...document.querySelectorAll('button')].find(b=>b.textContent==='Liga y copa oficiales');
+  await act(async()=>official.click());assert.match(document.body.textContent,/Copa Municipal/);assert.match(document.body.textContent,/pendientes de actualización/);
+});
+
+test('una respuesta antigua del portal no reaparece después de cambiar la sesión',async t=>{
+  const pending=deferred();let current=playerSession;
+  const h=await mount(t,{handle:path=>path==='session'?current:path==='player-portal'?pending.promise:undefined});
+  current={...account,user:null};
+  await act(async()=>h.channels[0].onmessage({data:{type:'changed',source:'other-tab'}}));
+  await act(async()=>pending.resolve(playerData));
+  assert.match(document.body.textContent,/Tu equipo te espera/);assert.doesNotMatch(document.body.textContent,/Equipo del jugador/);
+});
+
+test('abrir y aceptar una invitación limpia la sesión previa y permite crear contraseña',async t=>{
+  let current=account,accepted;
+  const h=await mount(t,{hash:'#auth=invite&token='+'b'.repeat(64),handle:(path,options)=>{
+    if(path==='session')return current;
+    if(path==='logout'){current={...account,user:null};return {ok:true};}
+    if(path==='player-invitations/info')return {email:'player@example.test',teamName:'Equipo invitado',playerName:'Jugador',existingAccount:false};
+    if(path==='player-invitations/accept'){accepted=JSON.parse(options.body);return {ok:true};}
+  }});
+  assert.ok(h.calls.includes('logout'));assert.ok(!h.calls.includes('team'));assert.equal(location.hash,'');
+  document.querySelector('[name=password]').value='Player-password-2026';document.querySelector('[name=confirm]').value='Player-password-2026';
+  await act(async()=>document.querySelector('form').dispatchEvent(new h.dom.window.Event('submit',{bubbles:true,cancelable:true})));
+  assert.equal(accepted.token,'b'.repeat(64));assert.match(document.body.textContent,/Correo verificado/);
+  await act(async()=>[...document.querySelectorAll('button')].find(b=>b.textContent==='Ir al inicio de sesión').click());
+  assert.match(document.body.textContent,/Tu equipo te espera/);assert.ok(!h.calls.includes('team'));
+});

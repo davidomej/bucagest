@@ -41,7 +41,7 @@ test('API y persistencia: autenticación, aislamiento, concurrencia y reintentos
   });
   await t.test('guarda, deduplica el reintento y rechaza revisiones antiguas',async()=>{
     const workspace=(await req('team',{cookie:a.cookie})).data.workspace,team=workspace.teams[0];
-    const command={type:'player.save',workspaceId:workspace.id,teamId:team.id,revision:workspace.revision,operationId:randomUUID(),payload:{name:'Jugador Prueba',number:7,position:'MED'}};
+    const command={type:'player.save',workspaceId:workspace.id,teamId:team.id,revision:workspace.revision,operationId:randomUUID(),payload:{email:'prueba@example.test',name:'Jugador Prueba',number:7,position:'MED'}};
     const saved=await req('command',{cookie:a.cookie,body:command});assert.equal(saved.status,200);assert.equal(saved.data.workspace.teams[0].players.length,1);
     const retry=await req('command',{cookie:a.cookie,body:command});assert.equal(retry.status,200);assert.equal(retry.data.workspace.teams[0].players.length,1);
     const stale=await req('command',{cookie:a.cookie,body:{...command,operationId:randomUUID()}});assert.equal(stale.status,409);
@@ -49,7 +49,7 @@ test('API y persistencia: autenticación, aislamiento, concurrencia y reintentos
   });
   await t.test('un comando de otra pestaña no puede modificar el equipo de otra cuenta',async()=>{
     const workspace=(await req('team',{cookie:a.cookie})).data.workspace;
-    const result=await req('command',{cookie:b.cookie,body:{type:'player.save',workspaceId:workspace.id,teamId:workspace.teams[0].id,revision:0,operationId:randomUUID(),payload:{name:'No debe entrar',number:8,position:'DEF'}}});assert.equal(result.status,409);
+    const result=await req('command',{cookie:b.cookie,body:{type:'player.save',workspaceId:workspace.id,teamId:workspace.teams[0].id,revision:0,operationId:randomUUID(),payload:{email:'foreign@example.test',name:'No debe entrar',number:8,position:'DEF'}}});assert.equal(result.status,409);
   });
   await t.test('serializa dos escrituras simultáneas con la misma revisión',async()=>{
     const workspace=await store.workspace(a.data.user.id);const base={type:'player.save',workspaceId:workspace.id,teamId:workspace.teams[0].id,revision:workspace.revision};

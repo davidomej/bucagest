@@ -63,7 +63,7 @@ test('verificar otra cuenta con una sesión abierta la revoca y mantiene los equ
   assert.notEqual(fresh.id,original.id);assert.equal(fresh.teams[0].settings.name,'Equipo nuevo');
   assert.deepEqual(fresh.teams[0].players,[]);assert.equal(fresh.teams[0].settings.crestId,null);
   assert.equal((await h.req(`assets/${asset}`,{cookie:second.cookie})).status,404);
-  const wrongTeam=await h.req('command',{cookie:second.cookie,body:{type:'player.save',workspaceId:original.id,teamId:original.activeTeamId,revision:original.revision,operationId:randomUUID(),payload:{name:'No permitido',number:9,position:'DEF'}}});
+  const wrongTeam=await h.req('command',{cookie:second.cookie,body:{type:'player.save',workspaceId:original.id,teamId:original.activeTeamId,revision:original.revision,operationId:randomUUID(),payload:{email:'foreign@example.test',name:'No permitido',number:9,position:'DEF'}}});
   assert.equal(wrongTeam.status,409);
   const firstAgain=await h.req('login',{body:{email:h.email,password:h.password}});
   assert.deepEqual((await h.req('team',{cookie:firstAgain.cookie})).data.workspace,original);

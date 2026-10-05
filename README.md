@@ -4,6 +4,7 @@ App web en español para gestionar un equipo de fútbol, su calendario y los min
 
 ## Qué incluye
 
+- Área de jugador de solo lectura: invitación por correo desde la plantilla, contraseña propia, minutos, resultados y calendario. Tablas preparadas para importar clasificaciones y resultados oficiales de liga y copa. Consulta [PLAYER_ACCESS_SETUP.md](PLAYER_ACCESS_SETUP.md).
 - Registro con correo verificado, recuperación de contraseña y acceso con Google, Apple o Facebook cuando están configurados. Cada cuenta conserva su espacio privado y puede utilizarse en varios dispositivos.
 - Nombre del equipo, competición y temporada; fútbol 5, 7, 8 u 11, duración prevista y reentradas configurables.
 - Alta, edición y archivo de jugadores con nombre, dorsal y posición. Archivar conserva el historial.
@@ -17,6 +18,8 @@ App web en español para gestionar un equipo de fútbol, su calendario y los min
 - Estadísticas por temporada y exportación CSV, incluyendo segundos exactos.
 
 ## Despliegue en Coolify con PostgreSQL existente
+
+Si compilar junto al resto de servicios satura la CPU del VPS, usa [el despliegue con imagen preparada en GitHub](COOLIFY_IMAGE_SETUP.md). El workflow incluido ejecuta las pruebas y construye la imagen fuera del VPS; Coolify solo la descarga y arranca.
 
 **Antes de desplegar esta versión:** completa [PRIVACY_SETUP.md](PRIVACY_SETUP.md). Producción exige una clave de cifrado y los datos reales del aviso de privacidad. Haz una copia recuperable antes de migrar el almacenamiento. El cifrado y las herramientas de privacidad no equivalen por sí solos a cumplimiento legal.
 

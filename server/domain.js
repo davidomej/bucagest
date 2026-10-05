@@ -8,11 +8,11 @@ const text = z.string().trim().min(1).max(100);
 const hexColor = z.string().regex(/^#[0-9a-fA-F]{6}$/, 'Color no válido.');
 const assetId = z.uuid().nullable().optional().transform(v => v ?? null);
 const isoDateOrNull = z.iso.date().nullable().optional().transform(v => v ?? null);
-const playerSchema = z.object({ name: text, number: z.number().int().min(0).max(99), position: z.enum(['POR', 'DEF', 'MED', 'DEL']), birthdate: isoDateOrNull, photoId: assetId });
+const playerSchema = z.object({ email:z.email().trim().max(254).transform(s=>s.toLowerCase()).nullable().optional().transform(v=>v??null), name: text, number: z.number().int().min(0).max(99), position: z.enum(['POR', 'DEF', 'MED', 'DEL']), birthdate: isoDateOrNull, photoId: assetId });
 const fixtureSchema = z.object({ opponent: text, date: z.iso.datetime({ offset: true }), venue: z.string().trim().max(120).default(''), home: z.boolean(), round: z.number().int().min(1).max(100), season: text, leagueId: assetId });
 const colorsSchema = z.object({ primary: hexColor, secondary: hexColor });
 const settingsSchema = z.object({ name: text, leagueIds: z.array(z.uuid()).max(10).default([]), season: text, playersOnField: z.union([z.literal(5), z.literal(7), z.literal(8), z.literal(11)]), matchMinutes: z.number().int().min(10).max(180), allowReentry: z.boolean(), crestId: assetId, colors: colorsSchema.default({ primary: '#8ac9eb', secondary: '#243944' }) });
-const leagueSchema = z.object({ name: text, season: text, color: hexColor });
+const leagueSchema = z.object({ kind:z.enum(['league','cup']).default('league'), name: text, season: text, color: hexColor });
 const paymentField = z.enum(['registration', 'insurance', 'uniformPaid', 'uniformDelivered', ...Array.from({length:12}, (_,i) => `month${i+1}`)]);
 // Fútbol 7 formations: goalkeeper slot plus six outfield slots, arranged defence→attack.
 export const FORMATIONS = {
@@ -51,6 +51,7 @@ export function normalizeWorkspace(data) {
       if (match.leagueId === undefined) match.leagueId = null;
     }
     for (const player of team.players) {
+      if (player.email === undefined) player.email = null;
       if (player.birthdate === undefined) player.birthdate = null;
       if (player.photoId === undefined) player.photoId = null;
     }
@@ -113,6 +114,7 @@ export function applyCommand(original, command, now = Date.now()) {
       record.checks[field] = value;
     } else if (type === 'player.save') {
       const value = playerSchema.parse(payload);
+      if(value.email)requireThat(!team.players.some(p=>p.id!==payload.id&&!p.archived&&p.email===value.email),'Ese correo ya está asignado a otro jugador de este equipo.');
       if(value.birthdate) {
         const today=new Date(now), adultDate=new Date(Date.UTC(today.getUTCFullYear()-18,today.getUTCMonth(),today.getUTCDate())).toISOString().slice(0,10);
         requireThat(value.birthdate<=adultDate, 'Esta versión solo admite jugadores adultos. No introduzcas datos de menores.');
