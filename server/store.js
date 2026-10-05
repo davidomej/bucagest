@@ -103,6 +103,13 @@ export async function createStore({ demo = false, pool: providedPool, encryption
       if(!created.rows.length)throw new AppError('Debes verificar tu correo antes de entrar.',403);
       return token;
     },
+    async restrictSessionToBench(token,userId,{teamId,matchId}) {
+      // Downgrade the existing credential atomically. Activation must not depend
+      // on the browser replacing its cookie after the manager session is revoked.
+      if(!token) throw new AppError('Inicia sesión para preparar el banquillo.',401);
+      const {rows}=await pool.query("UPDATE minuto_sessions SET bench_team_id=$3,bench_match_id=$4,expires_at=LEAST(expires_at,NOW()+INTERVAL '4 hours') WHERE token_hash=$1 AND user_id=$2 AND expires_at>NOW() AND bench_team_id IS NULL AND bench_match_id IS NULL RETURNING user_id",[tokenHash(token),userId,teamId,matchId]);
+      if(!rows.length) throw new AppError('La sesión ha cambiado o ha caducado. Vuelve a iniciar sesión como gestor.',401);
+    },
     async session(token) {
       if(!token) return null;
       const {rows} = await pool.query('SELECT u.id,u.email,u.name,s.bench_team_id,s.bench_match_id FROM minuto_sessions s JOIN minuto_users u ON u.id=s.user_id WHERE s.token_hash=$1 AND s.expires_at>NOW() AND u.email_verified_at IS NOT NULL',[tokenHash(token)]);

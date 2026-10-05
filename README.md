@@ -41,6 +41,16 @@ App web en español para gestionar un equipo de fútbol, su calendario y los min
 
 La imagen usa Node 22, compila la interfaz y ejecuta el servidor con un usuario sin privilegios. No necesita volumen de aplicación: los datos se guardan en PostgreSQL. Las tipografías se incluyen en la imagen, sin solicitudes a Google Fonts.
 
+### Si Coolify revierte el despliegue por salud
+
+- Comprueba que la referencia Git seleccionada contiene los cambios que quieres desplegar. Una etiqueta como `2.0` apunta a una versión concreta y no incorpora automáticamente los commits nuevos de `master`.
+- Si el registro indica `Build step skipped`, Coolify ha reutilizado una imagen. Para reconstruir la referencia seleccionada, usa **Force deploy (without cache)**; verifica antes que esa referencia contiene la corrección.
+- Este Dockerfile ejecuta la comprobación con Node, sin depender de `curl` ni `wget`. El aviso genérico de Coolify sobre esas herramientas no identifica por sí solo la causa del fallo.
+- Revisa los logs de arranque y de salud del contenedor nuevo. `HTTP 503` en `/api/health` indica que PostgreSQL no respondió correctamente; conexión rechazada indica que el servidor no escucha en el puerto consultado; un timeout indica que no respondió a tiempo. Confirma que `PORT` y el puerto expuesto son 3000 y que las variables requeridas están disponibles en ejecución.
+- Mantén activa la comprobación de salud: evita sustituir el contenedor anterior por uno que no puede atender solicitudes.
+
+Documentación: [comprobaciones de salud](https://coolify.io/docs/applications/configuration/health-checks), [reutilización de imágenes y reconstrucción](https://coolify.io/docs/core/build-deployment-model).
+
 ### PostgreSQL con TLS
 
 `DATABASE_URL` admite los parámetros SSL de node-postgres. Para un servidor con CA propia, configura `DATABASE_SSL_CA` con el certificado PEM; se admiten saltos de línea o `\n`. En ese caso, evita parámetros `sslmode`, `sslcert`, `sslkey` o `sslrootcert` en la URL, ya que pueden sustituir la configuración de CA. La app no desactiva la validación de certificados.

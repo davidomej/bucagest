@@ -19,9 +19,11 @@ export function installBench(app,store,{production}) {
     const workspace=await store.workspace(req.user.id);
     const match=workspace.teams.find(t=>t.id===teamId)?.matches.find(m=>m.id===matchId);
     if(!match||!['live','paused'].includes(match.status)) throw new AppError('Inicia un partido antes de preparar el modo banquillo.');
-    const token=await store.createSession(req.user.id,{teamId,matchId});
-    await store.logout(req.cookies.minuto_session);
-    res.set('Clear-Site-Data','"cache"').cookie('minuto_session',token,{httpOnly:true,secure:production,sameSite:'lax',path:'/',maxAge:4*60*60*1000}).json({ok:true});
+    const token=req.cookies.minuto_session;
+    await store.restrictSessionToBench(token,req.user.id,{teamId,matchId});
+    // Shorten browser persistence too, but the server already enforces the scope
+    // and expiry even when the browser keeps its previous cookie unchanged.
+    res.cookie('minuto_session',token,{httpOnly:true,secure:production,sameSite:'lax',path:'/',maxAge:4*60*60*1000}).json({ok:true});
   });
   app.get('/api/bench',async(req,res)=>{
     if(req.user.scope!=='bench') throw new AppError('Primero activa el modo banquillo.',403);

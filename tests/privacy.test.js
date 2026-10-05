@@ -21,12 +21,12 @@ async function user(store,email='privacy@example.test'){
   const link=await store.emailToken(email,'verify');
   return store.completeEmail({...link,kind:'verify',password});
 }
-async function harness(t){
+async function harness(t,{production=false}={}){
   const pool=await database(t),key=randomBytes(32).toString('hex');
   const store=await createStore({pool,encryptionKey:key});
   const a=await user(store),b=await user(store,'another@example.test');
   const cookie=`minuto_session=${await store.createSession(a.id)}`,other=`minuto_session=${await store.createSession(b.id)}`;
-  const app=createApp(store,{origin:'http://localhost:3000',mailer:{configured:false},providers:{}});app.use(errorHandler);
+  const app=createApp(store,{production,origin:'http://localhost:3000',mailer:{configured:false},providers:{}});app.use(errorHandler);
   const server=app.listen(0,'127.0.0.1');await once(server,'listening');t.after(()=>new Promise(r=>server.close(r)));
   const base=`http://127.0.0.1:${server.address().port}`;
   async function req(path,{body,cookie:session=cookie,origin}={}){
@@ -152,7 +152,7 @@ test('version para adultos y configuración legal incompleta visible como pendie
 });
 
 test('tablet: sesión restringida, sin cobros ni cumpleaños, cambios limitados al partido',async t=>{
-  const h=await harness(t);
+  const h=await harness(t,{production:true});
   await h.command('player.save',{name:'Titular',number:1,position:'POR',birthdate:'1990-01-01'});
   let w=await h.command('player.save',{name:'Suplente',number:2,position:'DEF',birthdate:'1991-02-02'});
   const [outgoing,incoming]=w.teams[0].players,teamId=w.teams[0].id;
@@ -164,10 +164,17 @@ test('tablet: sesión restringida, sin cobros ni cumpleaños, cambios limitados 
   const otherDevice=await h.store.createSession(h.a.id);
   assert.equal((await h.req('bench/start',{cookie:h.other,body:{teamId,matchId}})).status,400);
   const start=await h.req('bench/start',{body:{teamId,matchId}});assert.equal(start.status,200);
-  const cookie=start.headers.get('set-cookie').split(';')[0];
-  assert.equal((await h.req('team')).status,401); // Previous management session invalidated.
+  // Keep the cookie the browser already has, even if it ignores Set-Cookie.
+  const cookie=h.cookie;
+  assert.equal((await h.req('bench',{cookie})).status,200,'el navegador conserva acceso sin sustituir su cookie');
+  assert.ok(start.headers.get('set-cookie').split(';')[0]===cookie,'no sustituye la credencial del navegador');
+  for(const attribute of ['HttpOnly','Secure','SameSite=Lax','Max-Age=14400'])assert.ok(start.headers.get('set-cookie').includes(attribute));
+  assert.equal(start.headers.get('clear-site-data'),null,'no mezcla limpieza de datos del navegador con la activación');
+  assert.equal((await h.req('team')).status,403); // Same session now has restricted permissions.
   assert.ok(await h.store.session(otherDevice));
   const session=await h.req('session',{cookie});assert.equal(session.data.user.scope,'bench');assert.equal(session.data.user.email,'');
+  const expiry=await h.pool.query('SELECT expires_at > NOW() AS active, expires_at <= NOW() + INTERVAL \'4 hours\' AS limited FROM minuto_sessions WHERE user_id=$1 AND bench_match_id=$2',[h.a.id,matchId]);
+  assert.deepEqual(expiry.rows,[{active:true,limited:true}]);
   const bench=await h.req('bench',{cookie});assert.equal(bench.status,200);
   assert.equal(bench.data.players.length,2);assert.equal(bench.data.players[0].birthdate,null);
   assert.equal(bench.data.payments,undefined);assert.equal(bench.data.workspace,undefined);assert.equal(bench.data.match.events,undefined);
@@ -175,10 +182,32 @@ test('tablet: sesión restringida, sin cobros ni cumpleaños, cambios limitados 
   for(const path of ['team','assets/'+randomUUID()])assert.equal((await h.req(path,{cookie})).status,403);
   for(const path of ['command','privacy/export','privacy/delete-account','bench/start'])assert.equal((await h.req(path,{cookie,body:{password}})).status,403);
   const body={workspaceId:bench.data.workspaceId,revision:bench.data.revision,operationId:randomUUID(),outId:outgoing.id,inId:incoming.id};
+  assert.equal((await h.req('bench',{cookie:''})).status,401);
+  assert.equal((await h.req('bench/substitution',{cookie:'',body})).status,401);
+  assert.equal((await h.req('bench/substitution',{cookie:h.other,body})).status,403);
   assert.equal((await h.req('bench/substitution',{cookie,body:{...body,teamId:h.b.id}})).status,400);
   const change=await h.req('bench/substitution',{cookie,body});assert.equal(change.status,200);
   assert.equal(change.data.match.stints.find(s=>s.playerId===incoming.id).outSeconds,null);
   assert.equal(change.data.players[1].birthdate,null);assert.equal(change.data.payments,undefined);
   assert.equal((await h.req('bench/substitution',{cookie,body})).status,200);
-  await h.store.revokeSessions(h.a.id);assert.equal((await h.req('bench',{cookie})).status,401);
+  await h.pool.query("UPDATE minuto_sessions SET expires_at=NOW()-INTERVAL '1 second' WHERE user_id=$1 AND bench_match_id=$2",[h.a.id,matchId]);
+  assert.equal((await h.req('bench',{cookie})).status,401);
+  assert.equal((await h.req('bench/substitution',{cookie,body})).status,401);
+  assert.ok(await h.store.session(otherDevice));
+});
+
+test('restringir una sesión no acepta otra cuenta, no amplía su caducidad ni revive accesos revocados',async t=>{
+  const h=await harness(t),token=h.cookie.split('=')[1],scope={teamId:randomUUID(),matchId:randomUUID()};
+  await assert.rejects(h.store.restrictSessionToBench(token,h.b.id,scope),error=>error.status===401);
+  assert.equal((await h.store.session(token)).scope,undefined);
+  const before=await h.pool.query("UPDATE minuto_sessions SET expires_at=NOW()+INTERVAL '10 minutes' WHERE user_id=$1 RETURNING expires_at",[h.a.id]);
+  await h.store.restrictSessionToBench(token,h.a.id,scope);
+  const after=await h.pool.query('SELECT expires_at FROM minuto_sessions WHERE user_id=$1',[h.a.id]);
+  assert.deepEqual(after.rows,before.rows,'el cambio de modo no prolonga una sesión próxima a caducar');
+  await assert.rejects(h.store.restrictSessionToBench(token,h.a.id,{teamId:randomUUID(),matchId:randomUUID()}),error=>error.status===401);
+  assert.equal((await h.store.session(token)).benchMatchId,scope.matchId);
+  await h.store.revokeSessions(h.a.id);
+  await assert.rejects(h.store.restrictSessionToBench(token,h.a.id,scope),error=>error.status===401);
+  assert.equal(await h.store.session(token),null);
+  assert.ok(await h.store.session(h.other.split('=')[1]));
 });

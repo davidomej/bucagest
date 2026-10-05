@@ -7,11 +7,14 @@ import { privacyNotice } from './privacy.js';
 try { process.loadEnvFile(); } catch(error) { if(error.code !== 'ENOENT') throw error; }
 const production=process.env.NODE_ENV==='production';
 const demo=process.env.DEMO_MODE==='true';
+console.log('Arranque: comprobando la configuración.');
 if(production && demo) throw new Error('DEMO_MODE no está permitido en producción. Configura DATABASE_URL.');
 if(production && (!process.env.APP_ORIGIN || !process.env.APP_ORIGIN.startsWith('https://'))) throw new Error('APP_ORIGIN debe ser la URL pública HTTPS, sin barra final.');
 if(production && !process.env.DATA_ENCRYPTION_KEY) throw new Error('Configura DATA_ENCRYPTION_KEY antes de desplegar. Consulta PRIVACY_SETUP.md.');
 if(production && !privacyNotice().configured) throw new Error('Completa las variables PRIVACY_* del aviso de privacidad. Consulta PRIVACY_SETUP.md.');
+console.log(demo?'Arranque: preparando la demo.':'Arranque: conectando con PostgreSQL y preparando el almacenamiento.');
 const store=await createStore({demo});
+console.log('Arranque: almacenamiento preparado.');
 let cleaning=false;
 async function cleanup(){
   if(cleaning||!store.pruneTemporaryData)return;
@@ -19,7 +22,9 @@ async function cleanup(){
   try{await store.pruneTemporaryData();}catch{console.error('No se pudo completar la limpieza de datos temporales.');}
   finally{cleaning=false;}
 }
+console.log('Arranque: limpiando datos temporales caducados.');
 await cleanup();
+console.log('Arranque: preparando el servidor HTTP.');
 const cleanupTimer=setInterval(cleanup,60*60*1000);cleanupTimer.unref();
 const app=createApp(store,{production});
 if(production) {
